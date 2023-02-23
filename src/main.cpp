@@ -27,11 +27,14 @@
  * @author Luiz Villa <luiz.villa@laas.fr>
  */
 
-//--------------OWNTECH APIs----------------------------------
-#include "DataAPI.h"
-#include "TaskAPI.h"
-#include "TwistAPI.h"
-#include "SpinAPI.h"
+//-------------OWNTECH DRIVERS-------------------
+#include "HardwareConfiguration.h"
+#include "DataAcquisition.h"
+#include "Scheduling.h"
+
+//------------ZEPHYR DRIVERS----------------------
+#include "zephyr.h"
+#include "console/console.h"
 
 //--------------SETUP FUNCTIONS DECLARATION-------------------
 void setup_routine(); // Setups the hardware and software of the system
@@ -40,58 +43,185 @@ void setup_routine(); // Setups the hardware and software of the system
 void loop_background_task();   // Code to be executed in the background task
 void loop_critical_task();     // Code to be executed in real time in the critical task
 
-//--------------USER VARIABLES DECLARATIONS-------------------
+//--------------USER VARIABLES DECLARATIONS----------------------
 
+static uint32_t control_task_period = 100; //[us] period of the control task
+static bool pwm_enable = false;            //[bool] state of the PWM (ctrl task)
 
+uint8_t received_serial_char;
 
-//--------------SETUP FUNCTIONS-------------------------------
+/* Measure variables */
 
-/**
- * This is the setup routine.
- * It is used to call functions that will initialize your spin, twist, data and/or tasks.
- * In this example, we setup the version of the spin board and a background task.
- * The critical task is defined but not started.
- */
-void setup_routine()
+static float32_t V1_low_value;
+static float32_t V2_low_value;
+static float32_t I1_low_value;
+static float32_t I2_low_value;
+static float32_t I_high;
+static float32_t V_high;
+
+static float meas_data; // temp storage meas value (ctrl task)
+
+float32_t duty_cycle = 0.3;
+
+/* Variables used for recording */
+typedef struct Record_master {
+    float32_t I1_low_value;
+    float32_t I2_low_value;
+    float32_t V1_low_value;
+    float32_t V2_low_value;
+    float32_t Vhigh_value;
+    float32_t Ihigh_value;
+} record_t;
+
+record_t record_array[RECORD_SIZE];
+
+static uint32_t counter = 0;
+
+//---------------------------------------------------------------
+
+enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVERTER
 {
-    // Setup the hardware first
-    spin.version.setBoardVersion(TWIST_v_1_1_2);
+    IDLEMODE = 0,
+    POWERMODE
+};
 
-    // Then declare tasks
-    uint32_t background_task_number = task.createBackground(loop_background_task);
-    //task.createCritical(loop_critical_task, 500); // Uncomment if you use the critical task
+uint8_t mode = IDLEMODE;
 
-    // Finally, start tasks
-    task.startBackground(background_task_number);
-    //task.startCritical(); // Uncomment if you use the critical task
+//---------------SETUP FUNCTIONS----------------------------------
+
+void setup_hardware()
+{
+    hwConfig.configureAdcDefaultAllMeasurements();
+    console_init();
+    hwConfig.setBoardVersion(TWIST_v_1_1_2);
+    hwConfig.initInterleavedBuckMode(); // initialize in buck mode
 }
 
-//--------------LOOP FUNCTIONS--------------------------------
-
-/**
- * This is the code loop of the background task
- * It is executed second as defined by it suspend task in its last line.
- * You can use it to execute slow code such as state-machines.
- */
-void loop_background_task()
+void setup_software()
 {
-    // Task content
-    printk("Hello World! \n");
-    spin.led.toggle();
+    AppTask_num = scheduling.defineAsynchronousTask(loop_application_task);
+    CommTask_num = scheduling.defineAsynchronousTask(loop_communication_task);
+    scheduling.defineUninterruptibleSynchronousTask(&loop_control_task, control_task_period);
 
-    // Pause between two runs of the task
-    task.suspendBackgroundMs(1000);
+    scheduling.startAsynchronousTask(AppTask_num);
+    scheduling.startAsynchronousTask(CommTask_num);
+    scheduling.startUninterruptibleSynchronousTask();
 }
 
-/**
- * This is the code loop of the critical task
- * It is executed every 500 micro-seconds defined in the setup_software function.
- * You can use it to execute an ultra-fast code with the highest priority which cannot be interruped.
- * It is from it that you will control your power flow.
- */
-void loop_critical_task()
-{
+//---------------LOOP FUNCTIONS----------------------------------
 
+void loop_communication_task()
+{
+    while (1)
+    {
+        received_serial_char = console_getchar();
+        switch (received_serial_char)
+        {
+        case 'h':
+            //----------SERIAL INTERFACE MENU-----------------------
+            printk(" ________________________________________\n");
+            printk("|     ------- MENU ---------             |\n");
+            printk("|     press i : idle mode                |\n");
+            printk("|     press s : serial mode              |\n");
+            printk("|     press p : power mode               |\n");
+            printk("|     press u : duty cycle UP            |\n");
+            printk("|     press d : duty cycle DOWN          |\n");
+            printk("|________________________________________|\n\n");
+            //------------------------------------------------------
+            break;
+        case 'i':
+            printk("idle mode\n");
+            mode = IDLEMODE;
+            break;
+        case 'p':
+            printk("power mode\n");
+            mode = POWERMODE;
+            counter = 0;
+            break;
+        case 'u':
+            duty_cycle += 0.01;
+            break;
+        case 'd':
+            duty_cycle -= 0.01;
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+void loop_application_task()
+{
+    while (1)
+    {
+        if (mode == IDLEMODE)
+        {
+            hwConfig.setLedOff();
+        }
+        else if (mode == POWERMODE)
+        {
+            hwConfig.setLedOn();
+            printk("%f:", V_high);
+            printk("%f:", I_high);
+            printk("%f:", I1_low_value);
+            printk("%f:", I2_low_value);
+            printk("%f:", V1_low_value);
+            printk("%f\n", V2_low_value);
+        }
+        k_msleep(100);
+    }
+}
+
+void loop_control_task()
+{
+    meas_data = dataAcquisition.getV1Low();
+    if (meas_data != -10000)
+        V1_low_value = meas_data;
+
+    meas_data = dataAcquisition.getV2Low();
+    if (meas_data != -10000)
+        V2_low_value = meas_data;
+
+    meas_data = dataAcquisition.getI1Low();
+    if (meas_data != -10000)
+        I1_low_value = meas_data;
+
+    meas_data = dataAcquisition.getI2Low();
+    if (meas_data != -10000)
+        I2_low_value = meas_data;
+
+    meas_data = dataAcquisition.getVHigh();
+    if (meas_data != -10000)
+        V_high = meas_data;
+
+    meas_data = dataAcquisition.getIHigh();
+    if (meas_data != -10000)
+        I_high = meas_data;
+
+    if (mode == IDLEMODE)
+    {
+        pwm_enable = false;
+        hwConfig.setInterleavedOff();
+    }
+    else if (mode == POWERMODE)
+    {
+
+        hwConfig.setInterleavedDutyCycle(duty_cycle);
+        if (!pwm_enable)
+        {
+            pwm_enable = true;
+            hwConfig.setInterleavedOn();
+        }
+
+        record_array[counter].I1_low_value = I1_low_value;
+        record_array[counter].I2_low_value = I2_low_value;
+        record_array[counter].V1_low_value = V1_low_value;
+        record_array[counter].V2_low_value = V2_low_value;
+        record_array[counter].Ihigh_value = I_high;
+        record_array[counter].Vhigh_value = V_high;
+
+        if(counter < RECORD_SIZE) counter++;
+    }
 }
 
 /**
