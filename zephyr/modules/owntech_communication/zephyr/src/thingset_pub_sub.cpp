@@ -41,13 +41,15 @@ CAN_MSGQ_DEFINE(sub_msgq, 10);
 
 const struct can_filter ctrl_filter = {
     .id = TS_CAN_BASE_CONTROL,
-    .rtr = CAN_DATAFRAME,
-    .id_type = CAN_EXTENDED_IDENTIFIER,
-    .id_mask = TS_CAN_TYPE_MASK,
-    .rtr_mask = 1
+    // .rtr = CAN_DATAFRAME,
+    //.id_type = CAN_EXTENDED_IDENTIFIER,
+    .mask = TS_CAN_TYPE_MASK
+    // .id_mask = TS_CAN_TYPE_MASK,
+    // .flags = 1
 };
 
-void can_pub_isr(uint32_t err_flags, void *arg)
+
+void can_pub_isr(const struct device *dev, int error, void *user_data)
 {
 	// Do nothing. Publication messages are fire and forget.
 }
@@ -60,8 +62,8 @@ void can_pub_send(uint32_t can_id, uint8_t can_data[8], uint8_t data_len)
     }
 
     struct can_frame frame = {0};
-    frame.id_type = CAN_EXTENDED_IDENTIFIER;
-    frame.rtr     = CAN_DATAFRAME;
+    // frame.id_type = CAN_EXTENDED_IDENTIFIER;
+    // frame.rtr     = CAN_DATAFRAME;
     frame.id      = can_id;
     memcpy(frame.data, can_data, 8);
 
@@ -87,6 +89,7 @@ void send_ts_can_pub_message(uint16_t tag)
 		if (data_len >= 0)
 		{
 			can_pub_send(can_id, can_data, data_len);
+            printk("data sent \n");
 		}
 	} while (data_len >= 0);
 }
@@ -122,6 +125,7 @@ void can_pubsub_thread()
 
     if (!device_is_ready(can_dev))
 	{
+        printk("device not ready, abort");
         return;
     }
 
@@ -141,11 +145,13 @@ void can_pubsub_thread()
             // normal objects: only every second
             dataObjectsUpdateMeasures();
             send_ts_can_pub_message(SUBSET_CAN);
+            printk("SUBSET_CAN_BROADCAST");
         }
 
         if (count % control_time == 0) {
             // control objects: every 100 ms
             send_ts_can_pub_message(SUBSET_CTRL);
+            printk("SUBSET_CTRL_BROADCAST");
         }
 
 		struct can_frame rx_frame;

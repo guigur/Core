@@ -29,13 +29,13 @@ const struct isotp_fc_opts fc_opts = {
 };
 
 struct isotp_msg_id rx_addr = {
-    .id_type = CAN_EXTENDED_IDENTIFIER,
+    .ide = 1, //CAN_EXTENDED_IDENTIFIER,
     .use_ext_addr = 0,      // Normal ISO-TP addressing (using only CAN ID)
     .use_fixed_addr = 1,    // enable SAE J1939 compatible addressing
 };
 
 struct isotp_msg_id tx_addr = {
-    .id_type = CAN_EXTENDED_IDENTIFIER,
+    .ide = 1, //CAN_EXTENDED_IDENTIFIER,
     .use_ext_addr = 0,      // Normal ISO-TP addressing (using only CAN ID)
     .use_fixed_addr = 1,    // enable SAE J1939 compatible addressing
 };
@@ -64,8 +64,8 @@ void can_isotp_thread()
 
     while (1) {
         /* re-assign address in every loop as it may have been changed via ThingSet */
-        rx_addr.ext_id = TS_CAN_BASE_REQRESP | TS_CAN_PRIO_REQRESP | TS_CAN_TARGET_SET(can_node_addr);
-        tx_addr.ext_id = TS_CAN_BASE_REQRESP | TS_CAN_PRIO_REQRESP | TS_CAN_SOURCE_SET(can_node_addr);
+        rx_addr.ide = TS_CAN_BASE_REQRESP | TS_CAN_PRIO_REQRESP | TS_CAN_TARGET_SET(can_node_addr);
+        tx_addr.ide = TS_CAN_BASE_REQRESP | TS_CAN_PRIO_REQRESP | TS_CAN_SOURCE_SET(can_node_addr);
 
         ret = isotp_bind(&recv_ctx, can_dev, &rx_addr, &tx_addr, &fc_opts, K_FOREVER);
         if (ret != ISOTP_N_OK) {
