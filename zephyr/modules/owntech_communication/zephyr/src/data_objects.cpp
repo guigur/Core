@@ -51,17 +51,25 @@ uint16_t can_node_addr = 0x60;
 
 void dataObjectsUpdateMeasures()
 {
-    if (dataAcquisition.started() == true)
-    {
-        v1_low_value = dataAcquisition.peek(V1_LOW);
-        v2_low_value = dataAcquisition.peek(V2_LOW);
-        v_high_value = dataAcquisition.peek(V_HIGH);
-        i1_low_value = dataAcquisition.peek(I1_LOW);
-        i2_low_value = dataAcquisition.peek(I2_LOW);
-        i_high_value = dataAcquisition.peek(I_HIGH);
-        // Do not update this value for now, as the measure is not enabled
-        //temp_value = peekTemperature();
-    }
+    // if (dataAcquisition.started() == true)
+    // {
+    //     v1_low_value = dataAcquisition.peek(V1_LOW);
+    //     v2_low_value = dataAcquisition.peek(V2_LOW);
+    //     v_high_value = dataAcquisition.peek(V_HIGH);
+    //     i1_low_value = dataAcquisition.peek(I1_LOW);
+    //     i2_low_value = dataAcquisition.peek(I2_LOW);
+    //     i_high_value = dataAcquisition.peek(I_HIGH);
+    //     // Do not update this value for now, as the measure is not enabled
+    //     //temp_value = peekTemperature();
+    // }
+
+    v1_low_value = 1;
+    v2_low_value = 2;
+    v_high_value = 3;
+    i1_low_value = 4;
+    i2_low_value = 5;
+    i_high_value = 6;
+
 }
 
 /**
@@ -196,5 +204,3 @@ static ThingSetDataObject data_objects[] = {
 /* clang-format on */
 
 ThingSet ts(data_objects, sizeof(data_objects) / sizeof(ThingSetDataObject));
-
-
