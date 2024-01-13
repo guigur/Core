@@ -31,7 +31,7 @@ extern ThingSet ts;
 extern uint16_t can_node_addr;
 uint16_t broadcast_time = 10; //the time of the measurement variables broadcast (multiples of 100ms)
 uint16_t control_time = 10;  //the time of the control variables broadcast/receive (multiples of 100ms)
-static const struct device* can_dev = DEVICE_DT_GET(DT_NODELABEL(can1));
+static const struct device *can_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_can_primary));
 
 // below defines should go into the ThingSet library
 #define TS_CAN_SOURCE_GET(id)           (((uint32_t)id & TS_CAN_SOURCE_MASK) >> TS_CAN_SOURCE_POS)
@@ -40,31 +40,36 @@ static const struct device* can_dev = DEVICE_DT_GET(DT_NODELABEL(can1));
 CAN_MSGQ_DEFINE(sub_msgq, 10);
 
 const struct can_filter ctrl_filter = {
-    .id = TS_CAN_BASE_CONTROL,
+    .id = TS_CAN_BASE_PUBSUB,
     // .rtr = CAN_DATAFRAME,
     //.id_type = CAN_EXTENDED_IDENTIFIER,
-    .mask = TS_CAN_TYPE_MASK
+    .mask = TS_CAN_TYPE_MASK | CAN_EXT_ID_MASK,
     // .id_mask = TS_CAN_TYPE_MASK,
-    // .flags = 1
+     .flags = CAN_FILTER_DATA
+
 };
 
 
-void can_pub_isr(const struct device *dev, int error, void *user_data)
+void can_pub_isr(const struct device *dev, int error, void *arg)
 {
 	// Do nothing. Publication messages are fire and forget.
 }
 
 void can_pub_send(uint32_t can_id, uint8_t can_data[8], uint8_t data_len)
 {
+    int ret;
+
     if (!device_is_ready(can_dev))
 	{
         return;
     }
 
-    struct can_frame frame = {0};
-    // frame.id_type = CAN_EXTENDED_IDENTIFIER;
-    // frame.rtr     = CAN_DATAFRAME;
-    frame.id      = can_id;
+    struct can_frame frame = {
+        .id = can_id,
+        .dlc = 2,
+        .flags = CAN_FRAME_IDE
+    };
+
     memcpy(frame.data, can_data, 8);
 
 
@@ -72,7 +77,8 @@ void can_pub_send(uint32_t can_id, uint8_t can_data[8], uint8_t data_len)
 	{
         frame.dlc = data_len;
 
-        can_send(can_dev, &frame, K_MSEC(10), can_pub_isr, NULL);
+        int ret = can_send(can_dev, &frame, K_FOREVER, can_pub_isr, NULL);
+        if (ret!=0) printk("sending failed: %d \n", ret);
     }
 }
 
@@ -89,7 +95,6 @@ void send_ts_can_pub_message(uint16_t tag)
 		if (data_len >= 0)
 		{
 			can_pub_send(can_id, can_data, data_len);
-            printk("data sent \n");
 		}
 	} while (data_len >= 0);
 }
@@ -122,6 +127,7 @@ void update_ts_data_nodes(struct can_frame rx_frame)
 void can_pubsub_thread()
 {
 	enable_can();
+    can_start(can_dev);
 
     if (!device_is_ready(can_dev))
 	{
@@ -145,13 +151,11 @@ void can_pubsub_thread()
             // normal objects: only every second
             dataObjectsUpdateMeasures();
             send_ts_can_pub_message(SUBSET_CAN);
-            printk("SUBSET_CAN_BROADCAST");
         }
 
         if (count % control_time == 0) {
             // control objects: every 100 ms
             send_ts_can_pub_message(SUBSET_CTRL);
-            printk("SUBSET_CTRL_BROADCAST");
         }
 
 		struct can_frame rx_frame;
