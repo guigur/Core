@@ -18,7 +18,7 @@
 
 extern ThingSet ts;
 extern uint16_t can_node_addr;
-static const struct device* can_dev = DEVICE_DT_GET(DT_NODELABEL(can1));
+static const struct device* can_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_can_primary));
 
 #define RX_THREAD_STACK_SIZE 1024
 #define RX_THREAD_PRIORITY 2

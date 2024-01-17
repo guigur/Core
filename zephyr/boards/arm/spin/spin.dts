@@ -15,6 +15,7 @@
 #include "pinctrl.dtsi"
 #include "hrtim.dtsi"
 #include "adc.dtsi"
+#include "can.dtsi"
 #include "gpio.dtsi"
 
 
@@ -27,7 +28,7 @@
 		zephyr,console = &cdc_acm_uart0;
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
-		zephyr,can-primary = &can1;
+		zephyr,can-primary = &can2;
 		zephyr,boot-mode = &retention0;
 	};
 
@@ -216,6 +217,18 @@ zephyr_udc0: &usb {
 
 &can1 {
 	pinctrl-0 = <&fdcan1_rx_pb8 &fdcan1_tx_pb9>;
+	pinctrl-names = "default";
+	bus-speed = <500000>;
+	sjw = <1>;
+	sample-point = <875>;
+	bus-speed-data = <500000>;
+	sjw-data = <1>;
+	sample-point-data = <875>;
+	status = "disabled";
+};
+
+&can2 {
+	pinctrl-0 = <&fdcan2_rx_pb5 &fdcan2_tx_pb6>;
 	pinctrl-names = "default";
 	bus-speed = <500000>;
 	sjw = <1>;

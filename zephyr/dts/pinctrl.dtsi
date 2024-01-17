@@ -17,6 +17,12 @@
 				/* This is a dummy pin that does not exist with LQFP64 packaging */
 				pinmux = <STM32_PINMUX('D', 15, ANALOG)>;
 			};
+			fdcan2_rx_pb5: fdcan2_rx_pb5 {
+				pinmux = <STM32_PINMUX('B', 5, AF9)>;
+			};
+			fdcan2_tx_pb5: fdcan2_tx_pb6 {
+				pinmux = <STM32_PINMUX('B', 6, AF9)>;
+			};
 		};
 	};
 };
