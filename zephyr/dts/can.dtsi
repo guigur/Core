@@ -11,7 +11,7 @@
 	soc {
 		can2 {
 			compatible = "st,stm32-fdcan";
-			status = "disabled";
+			status = "okay";
 		};
 	};
 };

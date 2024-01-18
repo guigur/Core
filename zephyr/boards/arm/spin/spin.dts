@@ -15,13 +15,31 @@
 #include "pinctrl.dtsi"
 #include "hrtim.dtsi"
 #include "adc.dtsi"
-#include "can.dtsi"
+// #include "can.dtsi"
 #include "gpio.dtsi"
 
 
 / {
 	model = "OwnTech Spin";
 	compatible = "owntech,spin", "st,stm32g474re-nucleo";
+
+	soc {
+		usb: usb@40005c00 {
+			status = "okay";
+		};
+
+		can2: can@40006800 {
+			pinctrl-0 = <&fdcan2_rx_pb5 &fdcan2_tx_pb6>;
+			pinctrl-names = "default";
+			bus-speed = <500000>;
+			sjw = <1>;
+			sample-point = <875>;
+			bus-speed-data = <500000>;
+			sjw-data = <1>;
+			sample-point-data = <875>;
+			status = "okay";
+		};
+	};
 
 	chosen {
 		zephyr,code-partition = &slot0_partition;
@@ -227,17 +245,7 @@ zephyr_udc0: &usb {
 	status = "disabled";
 };
 
-&can2 {
-	pinctrl-0 = <&fdcan2_rx_pb5 &fdcan2_tx_pb6>;
-	pinctrl-names = "default";
-	bus-speed = <500000>;
-	sjw = <1>;
-	sample-point = <875>;
-	bus-speed-data = <500000>;
-	sjw-data = <1>;
-	sample-point-data = <875>;
-	status = "okay";
-};
+
 
 /*********/
 /* Timer */
