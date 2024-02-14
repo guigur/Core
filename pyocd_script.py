@@ -15,8 +15,8 @@ session = ConnectHelper.session_with_chosen_probe(ST_LINK_ID, options=options)
 session.open()
 session.target.elf = '.pio/build/owntech_power_converter/firmware.elf'
 provider = ELFSymbolProvider(session.target.elf)
-addr = provider.get_symbol_value("record_array") 
-RECORD_SIZE = 2047
+addr = provider.get_symbol_value("record_array")
+RECORD_SIZE = 64
 curves = [
         {'name': 'I1_low_value', 'format': 'f',},
         {'name': 'I2_low_value', 'format': 'f',},
@@ -30,7 +30,7 @@ print(f"record_slave addr = {addr:x}")
 
 
 tic = time.time()
-datas = session.target.read_memory_block32(addr, 6*RECORD_SIZE) 
+datas = session.target.read_memory_block32(addr, 6*RECORD_SIZE)
 toc = time.time()
 print(f"time : {toc-tic}")
 datas = np.reshape(datas, (-1, len(curves)))
@@ -49,12 +49,10 @@ axs[0].legend()
 
 axs[1].plot(results['I1_low_value'],label = 'I1_low_value')
 axs[1].plot(results['I2_low_value'],label = 'I2_low_value')
-axs[1].plot(results['Ihigh_value'],label = 'I2_low_value')
+axs[1].plot(results['Ihigh_value'],label = 'Ihigh_value')
 axs[1].set(ylabel='current')
 axs[1].legend()
 
 plt.show()
 
 session.close()
-
-        
