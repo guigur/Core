@@ -28,13 +28,13 @@
  */
 
 //-------------OWNTECH DRIVERS-------------------
-#include "HardwareConfiguration.h"
-#include "DataAcquisition.h"
-#include "Scheduling.h"
-
+#include "SpinAPI.h"
+#include "TaskAPI.h"
+#include "TwistAPI.h"
+#include "DataAPI.h"
 //------------ZEPHYR DRIVERS----------------------
-#include "zephyr.h"
-#include "console/console.h"
+#include "zephyr/zephyr.h"
+#include "zephyr/console/console.h"
 
 #define RECORD_SIZE 128 // Number of point to record
 
@@ -46,8 +46,9 @@
 void setup_routine(); // Setups the hardware and software of the system
 
 //--------------LOOP FUNCTIONS DECLARATION--------------------
-void loop_background_task();   // Code to be executed in the background task
-void loop_critical_task();     // Code to be executed in real time in the critical task
+void loop_application_task();   // Code to be executed in the background task
+void loop_communication_task();   // Code to be executed in the background task
+void loop_control_task();     // Code to be executed in real time in the critical task
 
 //--------------USER VARIABLES DECLARATIONS----------------------
 
@@ -55,6 +56,7 @@ static uint32_t control_task_period = 100; //[us] period of the control task
 static bool pwm_enable = false;            //[bool] state of the PWM (ctrl task)
 
 uint8_t received_serial_char;
+char bufferstr[255];
 
 /* Measure variables */
 
@@ -73,12 +75,14 @@ static float32_t delta_V2;
 static float32_t V2_max = 0.0;
 static float32_t V2_min = 0.0;
 
+int8_t AppTask_num, CommTask_num;
 
 static float32_t acquisition_moment = 0.06;
 
 static float meas_data; // temp storage meas value (ctrl task)
 
 float32_t duty_cycle = 0.3;
+float32_t starting_duty_cycle = 0.1;
 
 /* Variables used for recording */
 typedef struct Record_master {
@@ -99,27 +103,128 @@ static uint32_t print_counter = 0;
 
 //---------------------------------------------------------------
 
-enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVERTER
-{
-    IDLEMODE = 0,
-    STEPMODE_1,
-    STEPMODE_2,
-    POWERMODE
-};
+// enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVERTER
+// {
+//     IDLEMODE = 0,
+//     STEPMODE_1,
+//     STEPMODE_2,
+//     POWERMODE
+// };
 
-uint8_t mode = IDLEMODE;
+
+typedef enum
+{
+    IDLE, SERIAL,
+    DUTY, BUCK, BOOST, CAPACITOR, CALIBRATE, DUTY_RESET
+} tester_states_t;
+
+uint8_t mode = IDLE;
+
+typedef struct {
+    char cmd[16];
+    tester_states_t mode;
+    void (*func)();
+} cmdToState_t;
+
+cmdToState_t default_commands[] = {{"_i", IDLE, NULL}, {"_s", SERIAL, NULL}};
+cmdToState_t power_commands[] = {{"_d", DUTY, NULL}, {"_b", BUCK, NULL}, {"_t", BOOST, NULL}, {"_c", CAPACITOR, NULL},{"_k", CALIBRATE, NULL},{"_r", DUTY_RESET, NULL} };
+
+void defaultHandler()
+{
+    for(uint8_t i = 0; i < (sizeof(default_commands)/sizeof(cmdToState_t)); i++)
+    {
+        if (strncmp(bufferstr, default_commands[i].cmd, strlen(default_commands[i].cmd)) == 0)
+        {
+            mode = default_commands[i].mode;
+            return;
+        }
+    }
+    printk("unknown default command %s\n", bufferstr);
+}
+
+// void powerHandler()
+// {
+//     if (strncmp(bufferstr, "_TFP_PER", strlen("_TFP_PER")) == 0)
+//     {
+//         size_t prefixLength = strlen("_TFP_PER");
+//         uint16_t parameterValue = getAndConvertParameter(bufferstr + prefixLength, prefixLength);
+//         if (parameterValue <= UINT16_MAX)
+//         {
+//             lcdProgressBar(16, parameterValue);
+//         }
+//     }
+//     else if (strncmp(bufferstr, "_SFP_PER", strlen("_SFP_PER")) == 0)
+//     {
+//         size_t prefixLength = strlen("_SFP_PER");
+//         uint16_t parameterValue = getAndConvertParameter(bufferstr + prefixLength, prefixLength);
+//         if (parameterValue <= UINT16_MAX)
+//         {
+//             lcdProgressBar(16, parameterValue);
+//         }
+//     }
+// }
+
+// uint16_t getAndConvertParameter(const char *inputString, size_t prefixLength)
+// {
+//     // Find the position of the space character
+//     char *spacePosition = strchr(inputString, ':');
+
+//     // Check if space is found and extract the parameter
+//     if (spacePosition != NULL)
+//     {
+//         // Calculate the length of the parameter substring
+//         size_t parameterLength = strlen(spacePosition + 1);
+
+//         // Allocate memory for the parameter substring
+//         char parameter[parameterLength + 1];
+
+//         // Copy the parameter substring
+//         strncpy(parameter, spacePosition + 1, parameterLength);
+//         parameter[parameterLength] = '\0'; // Null-terminate the string
+
+//         // Convert the parameter to an integer
+//         char *endptr;
+//         long int intValue = strtol(parameter, &endptr, 10);
+
+//         // Check if the conversion was successful
+//         if (*endptr == '\0') {
+//             // Check if the integer fits within uint16_t range
+//             if (intValue >= 0 && intValue <= UINT16_MAX)
+//             {
+//                 return (uint16_t)intValue;
+//             }
+//             else
+//             {
+//                 printk("The parameter is not within the valid uint16_t range.\n");
+//             }
+//         }
+//         else
+//         {
+//             printk("The parameter is not a valid integer.\n");
+//         }
+//     }
+//     else
+//     {
+//         printk("No parameter found after the space.\n");
+//     }
+
+//     // Return an invalid value (you can handle this case as needed in your program)
+//     return UINT16_MAX + 1;
+// }
+
+
+
 
 //---------------SETUP FUNCTIONS----------------------------------
 
-void setup_hardware()
+void setup_routine()
 {
-    hwConfig.configureAdcDefaultAllMeasurements();
-    console_init();
-    hwConfig.setBoardVersion(SPIN_v_0_9);
-    hwConfig.initInterleavedBuckMode(); // initialize in buck mode
+    data.enableTwistDefaultChannels();
+    spin.version.setBoardVersion(SPIN_v_0_9);
+    twist.initAllBuck(); // initialize in buck mode
 
-    gpio.configurePin(LEG1_CAPA_DGND, OUTPUT);
-    gpio.configurePin(LEG2_CAPA_DGND, OUTPUT);
+    spin.gpio.configurePin(LEG1_CAPA_DGND, OUTPUT);
+    spin.gpio.configurePin(LEG2_CAPA_DGND, OUTPUT);
 
     float32_t GV1 = 0.044301359147286994;
     float32_t OV1 = -89.8291125470221;
@@ -135,27 +240,24 @@ void setup_hardware()
     float32_t GIH = 0.0052774398156665;
     float32_t OIH = -10.864400298536168;
 
-    dataAcquisition.setV1LowParameters(GV1, OV1);
-    dataAcquisition.setV2LowParameters(GV2, OV2);
-    dataAcquisition.setVHighParameters(GVH, OVH);
+    data.setParameters(V1_LOW, GV1, OV1);
+    data.setParameters(V2_LOW, GV2, OV2);
+    data.setParameters(V_HIGH, GVH, OVH);
 
-    dataAcquisition.setI1LowParameters(GI1, OI1);
-    dataAcquisition.setI2LowParameters(GI2, OI2);
-    dataAcquisition.setIHighParameters(GIH, OIH);
+    data.setParameters(I1_LOW, GI1, OI1);
+    data.setParameters(I2_LOW, GI2, OI2);
+    data.setParameters(I_HIGH, GIH, OIH);
 
-    gpio.setPin(LEG1_CAPA_DGND);
-    gpio.setPin(LEG2_CAPA_DGND);
-}
+    spin.gpio.setPin(LEG1_CAPA_DGND);
+    spin.gpio.setPin(LEG2_CAPA_DGND);
 
-void setup_software()
-{
-    AppTask_num = scheduling.defineAsynchronousTask(loop_application_task);
-    CommTask_num = scheduling.defineAsynchronousTask(loop_communication_task);
-    scheduling.defineUninterruptibleSynchronousTask(&loop_control_task, control_task_period);
+    AppTask_num = task.createBackground(loop_application_task);
+    CommTask_num = task.createBackground(loop_communication_task);
+    task.createCritical(&loop_control_task, control_task_period);
 
-    scheduling.startAsynchronousTask(AppTask_num);
-    scheduling.startAsynchronousTask(CommTask_num);
-    scheduling.startUninterruptibleSynchronousTask();
+    task.startBackground(AppTask_num);
+    task.startBackground(CommTask_num);
+    task.startCritical();
 }
 
 //---------------LOOP FUNCTIONS----------------------------------
@@ -165,55 +267,42 @@ void loop_communication_task()
     received_serial_char = console_getchar();
     switch (received_serial_char)
     {
-    case 'h':
-        //----------SERIAL INTERFACE MENU-----------------------
-        // printk(" ________________________________________\n");
-        // printk("|     ------- MENU ---------             |\n");
-        // printk("|     press i : idle mode                |\n");
-        // printk("|     press s : serial mode              |\n");
-        // printk("|     press p : power mode               |\n");
-        // printk("|     press u : duty cycle UP            |\n");
-        // printk("|     press d : duty cycle DOWN          |\n");
-        // printk("|________________________________________|\n\n");
-        //------------------------------------------------------
-        break;
-    case 'i':
-        printk("idle mode\n");
-        mode = IDLEMODE;
-        break;
-    case 'p':
-        printk("power mode\n");
-        mode = POWERMODE;
-        counter = 0;
-        break;
-    case 'a':
-        printk("step mode 1\n");
-        mode = STEPMODE_1;
-        counter = 0;
-        gpio.resetPin(LEG1_CAPA_DGND);
-        gpio.setPin(LEG2_CAPA_DGND);
-        break;
-    case 's':
-        printk("step mode 2\n");
-        mode = STEPMODE_2;
-        counter = 0;
-        gpio.setPin(LEG1_CAPA_DGND);
-        gpio.resetPin(LEG2_CAPA_DGND);
-        break;
-    case 'w':
-        gpio.setPin(LEG1_CAPA_DGND);
-        gpio.setPin(LEG2_CAPA_DGND);
-        break;
-    case 'x':
-        gpio.resetPin(LEG1_CAPA_DGND);
-        gpio.resetPin(LEG2_CAPA_DGND);
-        break;
-    case 'u':
-        duty_cycle += 0.01;
-        break;
     case 'd':
-        duty_cycle -= 0.01;
+        defaultHandler();
         break;
+    // case 'p':
+    //     console_read_line();
+    //     powerHandler();
+    //     // counter = 0;
+    //     break;
+    // case 'a':
+    //     printk("step mode 1\n");
+    //     mode = STEPMODE_1;
+    //     counter = 0;
+    //     spin.gpio.resetPin(LEG1_CAPA_DGND);
+    //     spin.gpio.setPin(LEG2_CAPA_DGND);
+    //     break;
+    // case 's':
+    //     printk("step mode 2\n");
+    //     mode = STEPMODE_2;
+    //     counter = 0;
+    //     spin.gpio.setPin(LEG1_CAPA_DGND);
+    //     spin.gpio.resetPin(LEG2_CAPA_DGND);
+    //     break;
+    // case 'w':
+    //     spin.gpio.setPin(LEG1_CAPA_DGND);
+    //     spin.gpio.setPin(LEG2_CAPA_DGND);
+    //     break;
+    // case 'x':
+    //     spin.gpio.resetPin(LEG1_CAPA_DGND);
+    //     spin.gpio.resetPin(LEG2_CAPA_DGND);
+    //     break;
+    // case 'u':
+    //     duty_cycle += 0.01;
+    //     break;
+    // case 'd':
+    //     duty_cycle -= 0.01;
+    //     break;
     default:
         break;
     }
@@ -221,126 +310,128 @@ void loop_communication_task()
 
 void loop_application_task()
 {
-    if (mode == IDLEMODE)
+    switch(mode)
     {
-        hwConfig.setLedOff();
+        case IDLE:
+            spin.led.turnOff();
+            printk("IDLE mode");
+            break;
+        case SERIAL:
+            spin.led.turnOn();
+            printk("SERIAL mode");
+            break;
+        case DUTY_RESET:
+            printk("DUTY RESET mode");
+            duty_cycle = starting_duty_cycle;
+            break;
+        default:
+            break;
+        // else if (mode == STEPMODE_1 || mode == STEPMODE_2)
+        // {
+            // spin.led.toggle();
+            // if(counter >= RECORD_SIZE){
+            //     printk("%f:", record_array[print_counter].I1_low_value);
+            //     printk("%f:", record_array[print_counter].I2_low_value);
+            //     printk("%f:", record_array[print_counter].Ihigh_value);
+            //     printk("%f:", record_array[print_counter].V1_low_value);
+            //     printk("%f:", record_array[print_counter].V2_low_value);
+            //     printk("%f:", record_array[print_counter].Vhigh_value);
+            //     printk("%d:", print_counter);
+            //     print_counter++;
+            //     if(print_counter > 30) print_counter = 0;
+            // }
+        // }
     }
-    else if (mode == POWERMODE)
-    {
-        hwConfig.setLedOn();
-    }
-    else if (mode == STEPMODE_1 || mode == STEPMODE_2)
-    {
-        hwConfig.setLedToggle();
-        if(counter >= RECORD_SIZE){
-            printk("%f:", record_array[print_counter].I1_low_value);
-            printk("%f:", record_array[print_counter].I2_low_value);
-            printk("%f:", record_array[print_counter].Ihigh_value);
-            printk("%f:", record_array[print_counter].V1_low_value);
-            printk("%f:", record_array[print_counter].V2_low_value);
-            printk("%f:", record_array[print_counter].Vhigh_value);
-            printk("%d:", print_counter);
-            print_counter++;
-            if(print_counter > 30) print_counter = 0;
-        }
-    }
-
 
     // acquisition_moment = acquisition_moment + 0.01;
     // if(acquisition_moment > 0.99) acquisition_moment = 0.02;
-    // hwConfig.setHrtimAdcTrigInterleaved(acquisition_moment);
+    // spin.setHrtimAdcTrigInterleaved(acquisition_moment);
     // printk("%f:", acquisition_moment);
 
-    printk("%f:", duty_cycle);
-    printk("%f:", V1_max);
-    printk("%f:", V2_max);
-    printk("%f:", I_high);
-    printk("%f:", I1_low_value);
-    printk("%f:", I2_low_value);
-    printk("%f:", V_high);
-    printk("%f:", V1_low_value);
-    printk("%f\n", V2_low_value);
+    // printk("%f:", duty_cycle);
+    // printk("%f:", V1_max);
+    // printk("%f:", V2_max);
+    // printk("%f:", I_high);
+    // printk("%f:", I1_low_value);
+    // printk("%f:", I2_low_value);
+    // printk("%f:", V_high);
+    // printk("%f:", V1_low_value);
+    // printk("%f\n", V2_low_value);
 
-    scheduling.suspendCurrentTaskMs(100);
+    task.suspendBackgroundMs(100);
 }
 
 void loop_control_task()
 {
-    meas_data = dataAcquisition.getV1Low();
-    if (meas_data != -10000)
+    meas_data = data.getLatest(V1_LOW);
+    if (meas_data != NO_VALUE)
         V1_low_value = meas_data;
 
-    meas_data = dataAcquisition.getV2Low();
-    if (meas_data != -10000)
+    meas_data = data.getLatest(V2_LOW);
+    if (meas_data != NO_VALUE)
         V2_low_value = meas_data;
 
-    meas_data = dataAcquisition.getI1Low();
-    if (meas_data != -10000)
+    meas_data = data.getLatest(V_HIGH);
+    if (meas_data != NO_VALUE)
         I1_low_value = meas_data;
 
-    meas_data = dataAcquisition.getI2Low();
-    if (meas_data != -10000)
+    meas_data = data.getLatest(I1_LOW);
+    if (meas_data != NO_VALUE)
         I2_low_value = meas_data;
 
-    meas_data = dataAcquisition.getVHigh();
-    if (meas_data != -10000)
+    meas_data = data.getLatest(I2_LOW);
+    if (meas_data != NO_VALUE)
         V_high = meas_data;
 
-    meas_data = dataAcquisition.getIHigh();
-    if (meas_data != -10000)
+    meas_data = data.getLatest(I_HIGH);
+    if (meas_data != NO_VALUE)
         I_high = meas_data;
 
-    // if(V1_low_value<V1_min) V1_min = V1_low_value;
-    // if(V1_low_value>V1_max) V1_max = V1_low_value;
-    // delta_V1 = V1_max - V1_min;
 
-    // if(V2_low_value<V2_min) V2_min = V2_low_value;
-    // if(V2_low_value>V2_max) V2_max = V2_low_value;
-    // delta_V2 = V2_max - V2_min;
-
-
-    if (mode == IDLEMODE)
-    {
-        pwm_enable = false;
-        hwConfig.setLeg1Off();
-        hwConfig.setLeg2Off();
-
+    switch(mode){
+        case IDLE:
+            pwm_enable = false;
+            twist.stopLeg(LEG1);
+            twist.stopLeg(LEG2);
+            break;
     }
-    else if (mode == POWERMODE ||  mode == STEPMODE_1 || mode == STEPMODE_2)
-    {
 
-        // hwConfig.setInterleavedDutyCycle(duty_cycle);
-        if(mode == STEPMODE_1) hwConfig.setLeg1DutyCycle(duty_cycle);
-        if(mode == STEPMODE_2) hwConfig.setLeg2DutyCycle(duty_cycle);
-        if (!pwm_enable)
-        {
-            pwm_enable = true;
-            if(mode == STEPMODE_1) hwConfig.setLeg1On();
-            if(mode == STEPMODE_2) hwConfig.setLeg2On();
-            // hwConfig.setInterleavedOn();
-            counter = 0;
-            V1_max  = 0;
-            V2_max  = 0;
-        }
+    // }
+    // else if (mode == POWERMODE ||  mode == STEPMODE_1 || mode == STEPMODE_2)
+    // {
 
-        if(mode == STEPMODE_1){
-            if(counter<RECORD_SIZE/2) gpio.resetPin(LEG1_CAPA_DGND);
-            record_array[counter].I1_low_value = I1_low_value;
-            record_array[counter].V1_low_value = V1_low_value;
-        }
-        if(mode == STEPMODE_2) {
-            record_array[counter].V2_low_value = V2_low_value;
-            record_array[counter].I2_low_value = I2_low_value;
-        }
+    //     // spin.setInterleavedDutyCycle(duty_cycle);
+    //     if(mode == STEPMODE_1) twist.setLegDutyCycle(LEG1,duty_cycle);
+    //     if(mode == STEPMODE_2) twist.setLegDutyCycle(LEG2,duty_cycle);
+    //     if (!pwm_enable)
+    //     {
+    //         pwm_enable = true;
+    //         if(mode == STEPMODE_1) twist.startLeg(LEG1);
+    //         if(mode == STEPMODE_2) twist.startLeg(LEG2);
+    //         // spin.setInterleavedOn();
+    //         counter = 0;
+    //         V1_max  = 0;
+    //         V2_max  = 0;
+    //     }
 
-        record_array[counter].Ihigh_value = I_high;
-        record_array[counter].Vhigh_value = V_high;
+    //     if(mode == STEPMODE_1){
+    //         if(counter<RECORD_SIZE/2) spin.gpio.resetPin(LEG1_CAPA_DGND);
+    //         record_array[counter].I1_low_value = I1_low_value;
+    //         record_array[counter].V1_low_value = V1_low_value;
+    //     }
+    //     if(mode == STEPMODE_2) {
+    //         record_array[counter].V2_low_value = V2_low_value;
+    //         record_array[counter].I2_low_value = I2_low_value;
+    //     }
 
-        if(V1_low_value>V1_max) V1_max = V1_low_value;
-        if(V2_low_value>V2_max) V2_max = V2_low_value;
+    //     record_array[counter].Ihigh_value = I_high;
+    //     record_array[counter].Vhigh_value = V_high;
 
-        if(counter < RECORD_SIZE) counter++;
-    }
+    //     if(V1_low_value>V1_max) V1_max = V1_low_value;
+    //     if(V2_low_value>V2_max) V2_max = V2_low_value;
+
+    //     if(counter < RECORD_SIZE) counter++;
+    // }
 }
 
 /**
