@@ -36,6 +36,11 @@
 #include "zephyr/zephyr.h"
 #include "zephyr/console/console.h"
 
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
+
 #define RECORD_SIZE 128 // Number of point to record
 
 #define LEG1_CAPA_DGND PC6
@@ -50,7 +55,17 @@ void loop_application_task();   // Code to be executed in the background task
 void loop_communication_task();   // Code to be executed in the background task
 void loop_control_task();     // Code to be executed in real time in the critical task
 
+//----------------SERIAL PROTOCOL HANDLER FUNCTIONS---------------------
+void console_read_line();
+void defaultHandler();
+void dutyHandler();
+void powerHandler();
+void referenceHandler();
+
+
 //--------------USER VARIABLES DECLARATIONS----------------------
+
+
 
 static uint32_t control_task_period = 100; //[us] period of the control task
 static bool pwm_enable = false;            //[bool] state of the PWM (ctrl task)
@@ -58,6 +73,8 @@ static bool pwm_enable = false;            //[bool] state of the PWM (ctrl task)
 uint8_t received_serial_char;
 uint8_t received_char;
 char bufferstr[255]={};
+bool print_done = false;
+
 
 /* Measure variables */
 
@@ -85,6 +102,9 @@ static float meas_data; // temp storage meas value (ctrl task)
 float32_t duty_cycle = 0.3;
 float32_t starting_duty_cycle = 0.1;
 
+float32_t *tracking_variable=NULL;
+float32_t reference_value = 0.0;
+
 /* Variables used for recording */
 typedef struct Record_master {
     float32_t I1_low_value;
@@ -102,45 +122,48 @@ record_t record_array[RECORD_SIZE];
 static uint32_t counter = 0;
 static uint32_t print_counter = 0;
 
+// Define a struct to hold the tracking variables and their names
+typedef struct {
+    const char *name;
+    float32_t *address;
+} TrackingVariables;
+
+// Declare the tracking variable struct
+TrackingVariables tracking_vars[] = {
+    {"V1", &V1_low_value},
+    {"V2", &V2_low_value},
+};
+
+// Define a struct to hold the tracking variables and their names
+typedef struct {
+    const char *name;
+    leg_t leg;
+} LegNames;
+
+// Declare the tracking variable struct
+LegNames leg_vars[] = {
+    {"LEG1", LEG1},
+    {"LEG2", LEG2},
+};
+
+
+uint8_t num_tracking_vars = 2;
 //---------------------------------------------------------------
 
 typedef enum
 {
     IDLE, SERIAL,
-    DUTY, BUCK, BOOST, CAPACITOR, CALIBRATE, DUTY_RESET
+    LEG, CALIBRATE, DUTY,
+    OPEN_LOOP, BUCK, BOOST, STEP
 } tester_states_t;
 
 uint8_t mode = IDLE;
 
-typedef struct {
-    char cmd[16];
-    tester_states_t mode;
-    void (*func)();
-} cmdToState_t;
-
-uint8_t num_defaul_commands = 2;
-
-cmdToState_t default_commands[] = {{"_i", IDLE, NULL}, {"_s", SERIAL, NULL}};
-cmdToState_t power_commands[] = {{"_d", DUTY, NULL}, {"_b", BUCK, NULL}, {"_t", BOOST, NULL}, {"_c", CAPACITOR, NULL},{"_k", CALIBRATE, NULL},{"_r", DUTY_RESET, NULL} };
-
-void defaultHandler()
-{
-    for(uint8_t i = 0; i < num_defaul_commands; i++) //iterates the default commands
-    {
-        if (strncmp(bufferstr, default_commands[i].cmd, strlen(default_commands[i].cmd)) == 0)
-        {
-            mode = default_commands[i].mode;
-            return;
-        }
-    }
-    printk("unknown default command %s\n", bufferstr);
-}
 
 
 void console_read_line()
 {
-    uint8_t i;
-    for (i = 0; received_char != '\n'; i++)
+    for (uint8_t i = 0; received_char != '\n'; i++)
     {
         received_char = console_getchar();
         if (received_char == '\n')
@@ -162,77 +185,111 @@ void console_read_line()
 }
 
 
-// void powerHandler()
-// {
-//     if (strncmp(bufferstr, "_TFP_PER", strlen("_TFP_PER")) == 0)
-//     {
-//         size_t prefixLength = strlen("_TFP_PER");
-//         uint16_t parameterValue = getAndConvertParameter(bufferstr + prefixLength, prefixLength);
-//         if (parameterValue <= UINT16_MAX)
-//         {
-//             lcdProgressBar(16, parameterValue);
-//         }
-//     }
-//     else if (strncmp(bufferstr, "_SFP_PER", strlen("_SFP_PER")) == 0)
-//     {
-//         size_t prefixLength = strlen("_SFP_PER");
-//         uint16_t parameterValue = getAndConvertParameter(bufferstr + prefixLength, prefixLength);
-//         if (parameterValue <= UINT16_MAX)
-//         {
-//             lcdProgressBar(16, parameterValue);
-//         }
-//     }
-// }
 
-// uint16_t getAndConvertParameter(const char *inputString, size_t prefixLength)
-// {
-//     // Find the position of the space character
-//     char *spacePosition = strchr(inputString, ':');
+void dutyHandler() {
+    // Check if the bufferstr starts with "_d_"
+    if (strncmp(bufferstr, "_d_", 3) == 0) {
+        // Extract the duty cycle value from the protocol message
+        float32_t duty_value = atof(bufferstr + 3);
 
-//     // Check if space is found and extract the parameter
-//     if (spacePosition != NULL)
-//     {
-//         // Calculate the length of the parameter substring
-//         size_t parameterLength = strlen(spacePosition + 1);
-
-//         // Allocate memory for the parameter substring
-//         char parameter[parameterLength + 1];
-
-//         // Copy the parameter substring
-//         strncpy(parameter, spacePosition + 1, parameterLength);
-//         parameter[parameterLength] = '\0'; // Null-terminate the string
-
-//         // Convert the parameter to an integer
-//         char *endptr;
-//         long int intValue = strtol(parameter, &endptr, 10);
-
-//         // Check if the conversion was successful
-//         if (*endptr == '\0') {
-//             // Check if the integer fits within uint16_t range
-//             if (intValue >= 0 && intValue <= UINT16_MAX)
-//             {
-//                 return (uint16_t)intValue;
-//             }
-//             else
-//             {
-//                 printk("The parameter is not within the valid uint16_t range.\n");
-//             }
-//         }
-//         else
-//         {
-//             printk("The parameter is not a valid integer.\n");
-//         }
-//     }
-//     else
-//     {
-//         printk("No parameter found after the space.\n");
-//     }
-
-//     // Return an invalid value (you can handle this case as needed in your program)
-//     return UINT16_MAX + 1;
-// }
+        // Check if the duty cycle value is within the valid range (0-100)
+        if (duty_value >= 0.0 && duty_value <= 100.0) {
+            // Update the duty cycle variable
+            duty_cycle = duty_value/100;
+            printk("Duty cycle updated to: %.2f\n", duty_cycle);
+        } else {
+            printk("Invalid duty cycle value: %.2f\n", duty_value);
+        }
+    } else {
+        printk("Invalid protocol format: %s\n", bufferstr);
+    }
+}
 
 
+void referenceHandler(){
+    const char *underscore1 = strchr(bufferstr + 2, '_');
+    if (underscore1 != NULL) {
+        // Find the position of the next underscore after the first underscore
+        const char *underscore2 = strchr(underscore1 + 1, '_');
+        if (underscore2 != NULL) {
+            // Extract the variable name between the underscores
+            char variable[3];
+            strncpy(variable, underscore1 + 1, underscore2 - underscore1 - 1);
+            variable[underscore2 - underscore1 - 1] = '\0';
+
+            // Extract the value after the second underscore
+            reference_value = atof(underscore2 + 1);
+
+            printk("Variable: %s\n", variable);
+            printk("Value: %.2f\n", reference_value);
+
+            // Finds the tracking variable and updates the address of the tracking_variable
+            for (uint8_t i = 0; i < num_tracking_vars; i++) {
+                if (strcmp(variable, tracking_vars[i].name) == 0) {
+                    tracking_variable = tracking_vars[i].address;
+                    break;
+                }
+            }
+        }
+    }
+
+}
+
+
+typedef struct {
+    char cmd[16];
+    tester_states_t mode;
+    void (*func)();
+} cmdToState_t;
+
+
+uint8_t num_default_commands = 2;
+uint8_t num_power_commands = 3;
+
+cmdToState_t default_commands[] = {
+    {"_i", IDLE, NULL},
+    {"_s", SERIAL, NULL}
+};
+
+cmdToState_t power_commands[] = {
+    {"_d", DUTY, dutyHandler},
+    {"_b", BUCK, referenceHandler},
+    {"_t", BOOST, referenceHandler},
+};
+
+
+void defaultHandler()
+{
+    for(uint8_t i = 0; i < num_default_commands; i++) //iterates the default commands
+    {
+        if (strncmp(bufferstr, default_commands[i].cmd, strlen(default_commands[i].cmd)) == 0)
+        {
+            mode = default_commands[i].mode;
+            print_done = false; //authorizes printing the current state once
+            return;
+        }
+    }
+    printk("unknown default command %s\n", bufferstr);
+}
+
+
+// Function to parse the power communications
+void powerHandler() {
+    for(uint8_t i = 0; i < num_power_commands; i++) //iterates the default commands
+    {
+        if (strncmp(bufferstr, power_commands[i].cmd, strlen(power_commands[i].cmd)) == 0)
+        {
+            mode = power_commands[i].mode;
+            print_done = false;                  //authorizes printing the current state once
+            if (power_commands[i].func != NULL)
+            {
+                power_commands[i].func(); //pointer to a function to do additional stuff if needed
+            }
+            return;
+        }
+    }
+    printk("unknown power command %s\n", bufferstr);
+}
 
 
 //---------------SETUP FUNCTIONS----------------------------------
@@ -289,15 +346,16 @@ void loop_communication_task()
     {
     case 'd':
         console_read_line();
-        // printk("buffer str = %s\n", bufferstr);
+        printk("buffer str = %s\n", bufferstr);
         defaultHandler();
-        spin.led.turnOn();
+        // spin.led.turnOn();
         break;
-    // case 'p':
-    //     console_read_line();
-    //     powerHandler();
-    //     // counter = 0;
-    //     break;
+    case 'p':
+        console_read_line();
+        printk("buffer str = %s\n", bufferstr);
+        powerHandler();
+        // counter = 0;
+        break;
     // case 'a':
     //     printk("step mode 1\n");
     //     mode = STEPMODE_1;
@@ -337,15 +395,29 @@ void loop_application_task()
     {
         case IDLE:
             spin.led.turnOff();
-            printk("IDLE mode \n");
+            if(!print_done) {
+                printk("IDLE mode \n");
+                print_done = true;
+            }
             break;
         case SERIAL:
             spin.led.turnOn();
-            printk("SERIAL mode \n");
+            if(!print_done) {
+                printk("SERIAL mode \n");
+                print_done = true;
+            }
             break;
-        case DUTY_RESET:
-            printk("DUTY RESET mode \n");
-            duty_cycle = starting_duty_cycle;
+        case BUCK:
+            if(!print_done) {
+                printk("BUCK mode \n");
+                print_done = true;
+            }
+            break;
+        case BOOST:
+            if(!print_done) {
+                printk("BOOST mode \n");
+                print_done = true;
+            }
             break;
         default:
             break;
@@ -417,44 +489,56 @@ void loop_control_task()
             twist.stopLeg(LEG1);
             twist.stopLeg(LEG2);
             break;
+        // case BUCK:
+        // case BOOST:
+        //     // if (!pwm_enable)
+        //     // {
+        //     //     pwm_enable = true;
+        //     //     if(mode == STEPMODE_1) twist.startLeg(LEG1);
+        //     //     if(mode == STEPMODE_2) twist.startLeg(LEG2);
+        //     //     // spin.setInterleavedOn();
+        //     //     counter = 0;
+        //     //     V1_max  = 0;
+        //     //     V2_max  = 0;
+        //     // }
+        //     // if(mode == STEPMODE_1) twist.setLegDutyCycle(LEG1,duty_cycle);
+        //     // if(mode == STEPMODE_2) twist.setLegDutyCycle(LEG2,duty_cycle);
+        //     break;
+        // case CAPACITOR:
+
+        //     if(mode == STEPMODE_1) twist.setLegDutyCycle(LEG1,duty_cycle);
+        //     if(mode == STEPMODE_2) twist.setLegDutyCycle(LEG2,duty_cycle);
+        //     if (!pwm_enable)
+        //     {
+        //         pwm_enable = true;
+        //         if(mode == STEPMODE_1) twist.startLeg(LEG1);
+        //         if(mode == STEPMODE_2) twist.startLeg(LEG2);
+        //         // spin.setInterleavedOn();
+        //         counter = 0;
+        //         V1_max  = 0;
+        //         V2_max  = 0;
+        //     }
+
+        //     if(mode == STEPMODE_1){
+        //         if(counter<RECORD_SIZE/2) spin.gpio.resetPin(LEG1_CAPA_DGND);
+        //         record_array[counter].I1_low_value = I1_low_value;
+        //         record_array[counter].V1_low_value = V1_low_value;
+        //     }
+        //     if(mode == STEPMODE_2) {
+        //         record_array[counter].V2_low_value = V2_low_value;
+        //         record_array[counter].I2_low_value = I2_low_value;
+        //     }
+
+        //     record_array[counter].Ihigh_value = I_high;
+        //     record_array[counter].Vhigh_value = V_high;
+
+        //     if(V1_low_value>V1_max) V1_max = V1_low_value;
+        //     if(V2_low_value>V2_max) V2_max = V2_low_value;
+
+        //     if(counter < RECORD_SIZE) counter++;
+        default:
+            break;
     }
-
-    // }
-    // else if (mode == POWERMODE ||  mode == STEPMODE_1 || mode == STEPMODE_2)
-    // {
-
-    //     // spin.setInterleavedDutyCycle(duty_cycle);
-    //     if(mode == STEPMODE_1) twist.setLegDutyCycle(LEG1,duty_cycle);
-    //     if(mode == STEPMODE_2) twist.setLegDutyCycle(LEG2,duty_cycle);
-    //     if (!pwm_enable)
-    //     {
-    //         pwm_enable = true;
-    //         if(mode == STEPMODE_1) twist.startLeg(LEG1);
-    //         if(mode == STEPMODE_2) twist.startLeg(LEG2);
-    //         // spin.setInterleavedOn();
-    //         counter = 0;
-    //         V1_max  = 0;
-    //         V2_max  = 0;
-    //     }
-
-    //     if(mode == STEPMODE_1){
-    //         if(counter<RECORD_SIZE/2) spin.gpio.resetPin(LEG1_CAPA_DGND);
-    //         record_array[counter].I1_low_value = I1_low_value;
-    //         record_array[counter].V1_low_value = V1_low_value;
-    //     }
-    //     if(mode == STEPMODE_2) {
-    //         record_array[counter].V2_low_value = V2_low_value;
-    //         record_array[counter].I2_low_value = I2_low_value;
-    //     }
-
-    //     record_array[counter].Ihigh_value = I_high;
-    //     record_array[counter].Vhigh_value = V_high;
-
-    //     if(V1_low_value>V1_max) V1_max = V1_low_value;
-    //     if(V2_low_value>V2_max) V2_max = V2_low_value;
-
-    //     if(counter < RECORD_SIZE) counter++;
-    // }
 }
 
 /**
