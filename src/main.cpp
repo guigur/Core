@@ -56,7 +56,8 @@ static uint32_t control_task_period = 100; //[us] period of the control task
 static bool pwm_enable = false;            //[bool] state of the PWM (ctrl task)
 
 uint8_t received_serial_char;
-char bufferstr[255];
+uint8_t received_char;
+char bufferstr[255]={};
 
 /* Measure variables */
 
@@ -103,15 +104,6 @@ static uint32_t print_counter = 0;
 
 //---------------------------------------------------------------
 
-// enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVERTER
-// {
-//     IDLEMODE = 0,
-//     STEPMODE_1,
-//     STEPMODE_2,
-//     POWERMODE
-// };
-
-
 typedef enum
 {
     IDLE, SERIAL,
@@ -126,12 +118,14 @@ typedef struct {
     void (*func)();
 } cmdToState_t;
 
+uint8_t num_defaul_commands = 2;
+
 cmdToState_t default_commands[] = {{"_i", IDLE, NULL}, {"_s", SERIAL, NULL}};
 cmdToState_t power_commands[] = {{"_d", DUTY, NULL}, {"_b", BUCK, NULL}, {"_t", BOOST, NULL}, {"_c", CAPACITOR, NULL},{"_k", CALIBRATE, NULL},{"_r", DUTY_RESET, NULL} };
 
 void defaultHandler()
 {
-    for(uint8_t i = 0; i < (sizeof(default_commands)/sizeof(cmdToState_t)); i++)
+    for(uint8_t i = 0; i < num_defaul_commands; i++) //iterates the default commands
     {
         if (strncmp(bufferstr, default_commands[i].cmd, strlen(default_commands[i].cmd)) == 0)
         {
@@ -141,6 +135,32 @@ void defaultHandler()
     }
     printk("unknown default command %s\n", bufferstr);
 }
+
+
+void console_read_line()
+{
+    uint8_t i;
+    for (i = 0; received_char != '\n'; i++)
+    {
+        received_char = console_getchar();
+        if (received_char == '\n')
+        {
+            if (bufferstr[i-1] == '\r')
+            {
+                bufferstr[i-1] = '\0';
+            }
+            else
+            {
+                bufferstr[i] = '\0';
+            }
+        }
+        else
+        {
+            bufferstr[i] = received_char;
+        }
+    }
+}
+
 
 // void powerHandler()
 // {
@@ -264,11 +284,14 @@ void setup_routine()
 
 void loop_communication_task()
 {
-    received_serial_char = console_getchar();
-    switch (received_serial_char)
+    received_char = console_getchar();
+    switch (received_char)
     {
     case 'd':
+        console_read_line();
+        // printk("buffer str = %s\n", bufferstr);
         defaultHandler();
+        spin.led.turnOn();
         break;
     // case 'p':
     //     console_read_line();
@@ -314,14 +337,14 @@ void loop_application_task()
     {
         case IDLE:
             spin.led.turnOff();
-            printk("IDLE mode");
+            printk("IDLE mode \n");
             break;
         case SERIAL:
             spin.led.turnOn();
-            printk("SERIAL mode");
+            printk("SERIAL mode \n");
             break;
         case DUTY_RESET:
-            printk("DUTY RESET mode");
+            printk("DUTY RESET mode \n");
             duty_cycle = starting_duty_cycle;
             break;
         default:
