@@ -71,6 +71,7 @@ void powerLegSettingsHandler();
 void boolSettingsHandler(uint8_t power_leg, uint8_t setting_position);
 void dutyHandler(uint8_t power_leg, uint8_t setting_position);
 void referenceHandler(uint8_t power_leg, uint8_t setting_position);
+void calibrationHandler();
 
 //--------------USER VARIABLES DECLARATIONS----------------------
 
@@ -142,16 +143,17 @@ uint8_t mode = IDLE;
 typedef struct {
     const char *name;
     float32_t *address;
+    channel_t channel_reference;
 } TrackingVariables;
 
 // Declare the tracking variable struct
 TrackingVariables tracking_vars[] = {
-    {"V1", &V1_low_value},
-    {"V2", &V2_low_value},
-    {"VH", &V_high_value},
-    {"I1", &I1_low_value},
-    {"I2", &I2_low_value},
-    {"IH", &I_high_value}
+    {"V1", &V1_low_value, V1_LOW},
+    {"V2", &V2_low_value, V2_LOW},
+    {"VH", &V_high_value, V_HIGH},
+    {"I1", &I1_low_value, I1_LOW},
+    {"I2", &I2_low_value, I2_LOW},
+    {"IH", &I_high_value, I_HIGH}
 };
 uint8_t num_tracking_vars = 6;
 
@@ -282,19 +284,52 @@ void referenceHandler(uint8_t power_leg, uint8_t setting_position){
 }
 
 
+
+void calibrationHandler() {
+    const char *underscore1 = strchr(bufferstr + 1, '_');
+    if (underscore1 != NULL) {
+        // Find the position of the next underscore after the first underscore
+        const char *underscore2 = strchr(underscore1 + 1, '_');
+        if (underscore2 != NULL) {
+            // Extract the variable name between the underscores
+            char variable[3];
+            strncpy(variable, bufferstr + 1, underscore1 - (bufferstr + 1));
+            variable[underscore1 - (bufferstr + 1)] = '\0';
+
+            // Find the position of the next underscore after the second underscore
+            const char *underscore3 = strchr(underscore2 + 1, '_');
+            if (underscore3 != NULL) {
+                // Extract the gain and offset values after the second underscore
+                float32_t gain = atof(underscore1 + 3); // Skip 'g_' and parse gain
+                float32_t offset = atof(underscore3 + 3); // Skip 'o_' and parse offset
+
+                // Print the parsed values
+                printk("Variable: %s\n", variable);
+                printk("Gain: %.8f\n", gain);
+                printk("Offset: %.8f\n", offset);
+
+                // Find the tracking variable and update its gain and offset
+                for (uint8_t i = 0; i < num_tracking_vars; i++) {
+                    if (strcmp(variable, tracking_vars[i].name) == 0) {
+                        data.setParameters(tracking_vars[i].channel_reference, gain, offset);
+                        printk("channel: %s\n", tracking_vars[i].name);
+                        printk("channel: %d\n", tracking_vars[i].channel_reference);
+                        break;
+                    }
+                }
+                printk("Variable not found: %s\n", variable);
+            }
+        }
+    }
+}
+
 void boolSettingsHandler(uint8_t power_leg, uint8_t setting_position)
 {
-    // Check if the command is for turning the leg on
     if (strncmp(bufferstr + 7, "_on", 3) == 0) {
         power_leg_settings[power_leg].settings[setting_position] = BOOL_SETTING_ON;
-        // printk("The leg is %d and the setting is %d", power_leg, setting_position);
-        // printk("Result %d", power_leg_settings[power_leg].settings[setting_position]);
     }
-    // Check if the command is for turning the leg off
     else if (strncmp(bufferstr + 7, "_off", 4) == 0) {
         power_leg_settings[power_leg].settings[setting_position] = BOOL_SETTING_OFF;
-        // printk("The leg is %d and the setting is %d", power_leg, setting_position);
-        // printk("Result %d", power_leg_settings[power_leg].settings[setting_position]);
     }
     else {
         // Unknown command
@@ -445,13 +480,11 @@ void loop_communication_task()
         powerLegSettingsHandler();
         // counter = 0;
         break;
-    // case 'a':
-    //     printk("step mode 1\n");
-    //     mode = STEPMODE_1;
-    //     counter = 0;
-    //     spin.gpio.resetPin(LEG1_CAPA_DGND);
-    //     spin.gpio.setPin(LEG2_CAPA_DGND);
-    //     break;
+    case 'k':
+        console_read_line();
+        printk("buffer str = %s\n", bufferstr);
+        calibrationHandler();
+        break;
     // case 's':
     //     printk("step mode 2\n");
     //     mode = STEPMODE_2;
