@@ -46,6 +46,13 @@
 #define LEG1_CAPA_DGND PC6
 #define LEG2_CAPA_DGND PB7
 
+#define BOOL_SETTING_OFF 0
+#define BOOL_SETTING_ON 1
+
+#define LEG_1 0
+#define LEG_2 1
+
+
 
 //--------------SETUP FUNCTIONS DECLARATION-------------------
 void setup_routine(); // Setups the hardware and software of the system
@@ -58,10 +65,12 @@ void loop_control_task();     // Code to be executed in real time in the critica
 //----------------SERIAL PROTOCOL HANDLER FUNCTIONS---------------------
 void console_read_line();
 void defaultHandler();
-void dutyHandler();
 void powerHandler();
-void referenceHandler();
+void powerLegSettingsHandler();
 
+void boolSettingsHandler(uint8_t power_leg, uint8_t setting_position);
+void dutyHandler(uint8_t power_leg, uint8_t setting_position);
+void referenceHandler(uint8_t power_leg, uint8_t setting_position);
 
 //--------------USER VARIABLES DECLARATIONS----------------------
 
@@ -82,8 +91,8 @@ static float32_t V1_low_value;
 static float32_t V2_low_value;
 static float32_t I1_low_value;
 static float32_t I2_low_value;
-static float32_t I_high;
-static float32_t V_high;
+static float32_t I_high_value;
+static float32_t V_high_value;
 
 static float32_t delta_V1;
 static float32_t V1_max = 0.0;
@@ -99,10 +108,10 @@ static float32_t acquisition_moment = 0.06;
 
 static float meas_data; // temp storage meas value (ctrl task)
 
-float32_t duty_cycle = 0.3;
+// float32_t duty_cycle = 0.3;
 float32_t starting_duty_cycle = 0.1;
 
-float32_t *tracking_variable=NULL;
+// float32_t *tracking_variable=NULL;
 float32_t reference_value = 0.0;
 
 /* Variables used for recording */
@@ -122,6 +131,13 @@ record_t record_array[RECORD_SIZE];
 static uint32_t counter = 0;
 static uint32_t print_counter = 0;
 
+typedef enum
+{
+    IDLE, POWER_ON, POWER_OFF
+} tester_states_t;
+
+uint8_t mode = IDLE;
+
 // Define a struct to hold the tracking variables and their names
 typedef struct {
     const char *name;
@@ -132,33 +148,65 @@ typedef struct {
 TrackingVariables tracking_vars[] = {
     {"V1", &V1_low_value},
     {"V2", &V2_low_value},
+    {"VH", &V_high_value},
+    {"I1", &I1_low_value},
+    {"I2", &I2_low_value},
+    {"IH", &I_high_value}
 };
+uint8_t num_tracking_vars = 6;
 
-// Define a struct to hold the tracking variables and their names
+// Define a struct to hold the settings of each power leg
 typedef struct {
-    const char *name;
-    leg_t leg;
-} LegNames;
+    // bool leg_on    - to define if the leg is ON or OFF
+    // bool capa_on   - to define if the capacitor of the leg is ON or OFF
+    // bool driver_on - to define if the driver of the leg is ON or OFF
+    // bool buck_mode - to define is the leg is in buck mode or boost mode
+    bool settings[4];
+    float32_t *tracking_variable;
+    float32_t reference_value;
+    float32_t duty_cycle;
+} PowerLegSettings;
 
-// Declare the tracking variable struct
-LegNames leg_vars[] = {
-    {"LEG1", LEG1},
-    {"LEG2", LEG2},
+PowerLegSettings power_leg_settings[] = {
+    //   LEG_OFF      ,   CAPA_OFF      , DRIVER_OFF      ,  BUCK_MODE_ON
+    {{BOOL_SETTING_OFF, BOOL_SETTING_OFF, BOOL_SETTING_OFF,  BOOL_SETTING_ON},  &V1_low_value, reference_value, starting_duty_cycle},
+    {{BOOL_SETTING_OFF, BOOL_SETTING_OFF, BOOL_SETTING_OFF,  BOOL_SETTING_ON},  &V2_low_value, reference_value, starting_duty_cycle}
 };
 
+typedef struct {
+    char cmd[16];
+    void (*func)(uint8_t power_leg, uint8_t setting_position);
+} cmdToSettings_t;
 
-uint8_t num_tracking_vars = 2;
+cmdToSettings_t power_settings[] = {
+    {"_l", boolSettingsHandler},
+    {"_c", boolSettingsHandler},
+    {"_v", boolSettingsHandler},
+    {"_b", boolSettingsHandler},
+    {"_r", referenceHandler},
+    {"_d", dutyHandler},
+};
+
+uint8_t num_power_settings =  sizeof(power_settings)/sizeof(power_settings[0]);
+
+
+typedef struct {
+    char cmd[16];
+    tester_states_t mode;
+    void (*func)();
+} cmdToState_t;
+
+cmdToState_t default_commands[] = {
+    {"_i", IDLE, NULL},
+    {"_f", POWER_OFF, NULL},
+    {"_o", POWER_ON, NULL},
+};
+
+uint8_t num_default_commands = sizeof(default_commands)/sizeof(default_commands[0]);
+
+
+
 //---------------------------------------------------------------
-
-typedef enum
-{
-    IDLE, SERIAL,
-    LEG, CALIBRATE, DUTY,
-    OPEN_LOOP, BUCK, BOOST, STEP
-} tester_states_t;
-
-uint8_t mode = IDLE;
-
 
 
 void console_read_line()
@@ -185,20 +233,18 @@ void console_read_line()
 }
 
 
-
-void dutyHandler() {
+void dutyHandler(uint8_t power_leg, uint8_t setting_position) {
     // Check if the bufferstr starts with "_d_"
-    if (strncmp(bufferstr, "_d_", 3) == 0) {
+    if (strncmp(bufferstr, "_LEG1_d_", 8) == 0 || strncmp(bufferstr, "_LEG2_d_", 8) == 0) {
         // Extract the duty cycle value from the protocol message
-        float32_t duty_value = atof(bufferstr + 3);
+        float32_t duty_value = atof(bufferstr + 9);
 
         // Check if the duty cycle value is within the valid range (0-100)
-        if (duty_value >= 0.0 && duty_value <= 100.0) {
+        if (duty_value >= 0.0 && duty_value <= 1.0) {
             // Update the duty cycle variable
-            duty_cycle = duty_value/100;
-            printk("Duty cycle updated to: %.2f\n", duty_cycle);
+            power_leg_settings[power_leg].duty_cycle = duty_value;
         } else {
-            printk("Invalid duty cycle value: %.2f\n", duty_value);
+            printk("Invalid duty cycle value: %.5f\n", duty_value);
         }
     } else {
         printk("Invalid protocol format: %s\n", bufferstr);
@@ -206,8 +252,8 @@ void dutyHandler() {
 }
 
 
-void referenceHandler(){
-    const char *underscore1 = strchr(bufferstr + 2, '_');
+void referenceHandler(uint8_t power_leg, uint8_t setting_position){
+    const char *underscore1 = strchr(bufferstr + 6, '_');
     if (underscore1 != NULL) {
         // Find the position of the next underscore after the first underscore
         const char *underscore2 = strchr(underscore1 + 1, '_');
@@ -221,12 +267,12 @@ void referenceHandler(){
             reference_value = atof(underscore2 + 1);
 
             printk("Variable: %s\n", variable);
-            printk("Value: %.2f\n", reference_value);
+            printk("Value: %.5f\n", reference_value);
 
             // Finds the tracking variable and updates the address of the tracking_variable
             for (uint8_t i = 0; i < num_tracking_vars; i++) {
                 if (strcmp(variable, tracking_vars[i].name) == 0) {
-                    tracking_variable = tracking_vars[i].address;
+                    power_leg_settings[power_leg].tracking_variable = tracking_vars[i].address;
                     break;
                 }
             }
@@ -236,26 +282,25 @@ void referenceHandler(){
 }
 
 
-typedef struct {
-    char cmd[16];
-    tester_states_t mode;
-    void (*func)();
-} cmdToState_t;
-
-
-uint8_t num_default_commands = 2;
-uint8_t num_power_commands = 3;
-
-cmdToState_t default_commands[] = {
-    {"_i", IDLE, NULL},
-    {"_s", SERIAL, NULL}
-};
-
-cmdToState_t power_commands[] = {
-    {"_d", DUTY, dutyHandler},
-    {"_b", BUCK, referenceHandler},
-    {"_t", BOOST, referenceHandler},
-};
+void boolSettingsHandler(uint8_t power_leg, uint8_t setting_position)
+{
+    // Check if the command is for turning the leg on
+    if (strncmp(bufferstr + 7, "_on", 3) == 0) {
+        power_leg_settings[power_leg].settings[setting_position] = BOOL_SETTING_ON;
+        // printk("The leg is %d and the setting is %d", power_leg, setting_position);
+        // printk("Result %d", power_leg_settings[power_leg].settings[setting_position]);
+    }
+    // Check if the command is for turning the leg off
+    else if (strncmp(bufferstr + 7, "_off", 4) == 0) {
+        power_leg_settings[power_leg].settings[setting_position] = BOOL_SETTING_OFF;
+        // printk("The leg is %d and the setting is %d", power_leg, setting_position);
+        // printk("Result %d", power_leg_settings[power_leg].settings[setting_position]);
+    }
+    else {
+        // Unknown command
+        printk("Unknown power command for LEG%d leg\n", power_leg + 1);
+    }
+}
 
 
 void defaultHandler()
@@ -273,17 +318,55 @@ void defaultHandler()
 }
 
 
-// Function to parse the power communications
-void powerHandler() {
-    for(uint8_t i = 0; i < num_power_commands; i++) //iterates the default commands
+// // Function to parse the power communications
+// void powerHandler() {
+//     for(uint8_t i = 0; i < num_power_settings; i++) //iterates the default commands
+//     {
+//         if (strncmp(bufferstr, power_settings[i].cmd, strlen(power_settings[i].cmd)) == 0)
+//         {
+//             if (power_settings[i].func != NULL)
+//             {
+//                 power_settings[i].func(); //pointer to a function to do additional stuff if needed
+//             }
+//             return;
+//         }
+//     }
+//     printk("unknown power command %s\n", bufferstr);
+// }
+
+
+// Function to parse the power leg settings commands
+void powerLegSettingsHandler() {
+
+    // Determine the power leg based on the received message
+    uint8_t power_leg = LEG_1; // Default to LEG_1
+    if (strncmp(bufferstr, "_LEG2_", strlen("_LEG2_")) == 0) {
+        power_leg = LEG_2;
+    } else if (strncmp(bufferstr, "_LEG1_", strlen("_LEG1_")) != 0) {
+        printk("Unknown leg identifier\n");
+        return;
+    }
+
+    // COMMAND EXTRACTION
+    // Find the position of the second underscore after the leg identifier
+    const char *underscore2 = strchr(bufferstr + 5, '_');
+    if (underscore2 == NULL) {
+        printk("Invalid command format\n");
+        return;
+    }
+    // Extract the command part after the leg identifier
+    char command[3];
+    strncpy(command, underscore2, 2);
+    command[2] = '\0';
+
+    // FIND THE HANDLER OF THE SPECIFIC SETTING COMMAND
+    for(uint8_t i = 0; i < num_power_settings; i++) //iterates the default commands
     {
-        if (strncmp(bufferstr, power_commands[i].cmd, strlen(power_commands[i].cmd)) == 0)
+        if (strncmp(command, power_settings[i].cmd, strlen(power_settings[i].cmd)) == 0)
         {
-            mode = power_commands[i].mode;
-            print_done = false;                  //authorizes printing the current state once
-            if (power_commands[i].func != NULL)
+            if (power_settings[i].func != NULL)
             {
-                power_commands[i].func(); //pointer to a function to do additional stuff if needed
+                power_settings[i].func(power_leg, i); //pointer to the handler function associated with the command
             }
             return;
         }
@@ -350,10 +433,16 @@ void loop_communication_task()
         defaultHandler();
         // spin.led.turnOn();
         break;
-    case 'p':
+    // case 'p':
+    //     console_read_line();
+    //     printk("buffer str = %s\n", bufferstr);
+    //     powerHandler();
+    //     // counter = 0;
+    //     break;
+    case 's':
         console_read_line();
         printk("buffer str = %s\n", bufferstr);
-        powerHandler();
+        powerLegSettingsHandler();
         // counter = 0;
         break;
     // case 'a':
@@ -396,26 +485,20 @@ void loop_application_task()
         case IDLE:
             spin.led.turnOff();
             if(!print_done) {
-                printk("IDLE mode \n");
+                printk("IDLE \n");
                 print_done = true;
             }
             break;
-        case SERIAL:
+        case POWER_OFF:
             spin.led.turnOn();
             if(!print_done) {
-                printk("SERIAL mode \n");
+                printk("POWER OFF \n");
                 print_done = true;
             }
             break;
-        case BUCK:
+        case POWER_ON:
             if(!print_done) {
-                printk("BUCK mode \n");
-                print_done = true;
-            }
-            break;
-        case BOOST:
-            if(!print_done) {
-                printk("BOOST mode \n");
+                printk("POWER ON \n");
                 print_done = true;
             }
             break;
@@ -476,11 +559,11 @@ void loop_control_task()
 
     meas_data = data.getLatest(I2_LOW);
     if (meas_data != NO_VALUE)
-        V_high = meas_data;
+        V_high_value = meas_data;
 
     meas_data = data.getLatest(I_HIGH);
     if (meas_data != NO_VALUE)
-        I_high = meas_data;
+        I_high_value = meas_data;
 
 
     switch(mode){
