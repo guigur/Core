@@ -110,6 +110,15 @@ uint8_t rs485_receive;
 /* Sync test parameters*/
 uint8_t sync_master_counter = 0;
 
+/* CAN Bus test parameters*/
+bool can_test_ctrl_enable;
+uint16_t can_test_reference_value;
+
+uint16_t CAN_Bus_receive;
+uint16_t CAN_Bus_receive_ref = 3000;
+bool CAN_Bus_bool_receive;
+
+
 /* BOOL value for testing */
 bool test_start = false; // start the test after a certain period of time
 bool RS485_success = false;
@@ -308,6 +317,8 @@ void powerLegSettingsHandler() {
 void slave_reception_function(void)
 {
     tx_consigne = rx_consigne;
+    tx_consigne.test_bool_CAN  = can_test_ctrl_enable;
+    tx_consigne.test_CAN = can_test_reference_value;
     tx_consigne.test_RS485 = rx_consigne.test_RS485 + 1;
     tx_consigne.test_Sync = ctrl_slave_counter;
     tx_consigne.analog_value_measure = analog_value;
@@ -319,9 +330,12 @@ void master_reception_function(void)
 {
     analog_value = rx_consigne.analog_value_measure;
     rs485_receive = rx_consigne.test_RS485;
+    CAN_Bus_receive = rx_consigne.test_CAN;
+    CAN_Bus_bool_receive = rx_consigne.test_bool_CAN;
 
     if(test_start && (rs485_receive == rs485_send + 1)) RS485_success = true;
     if(test_start && RS485_success && (analog_value - analog_value_ref > 50 || analog_value - analog_value_ref > -50)) Analog_success = true;
+    if(test_start && RS485_success && (CAN_Bus_receive - CAN_Bus_receive_ref > 50 || CAN_Bus_receive - CAN_Bus_receive_ref > -50  )) Can_success = true;
     if(test_start && RS485_success && (sync_master_counter < 5 && rx_consigne.test_Sync == 10))
     {
         sync_master_counter++;
