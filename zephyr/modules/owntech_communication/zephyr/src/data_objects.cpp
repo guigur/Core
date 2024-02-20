@@ -19,7 +19,7 @@
 #include <string.h>
 
 #include "thingset.h"
-#include "DataAcquisition.h"
+#include "DataAPI.h"
 
 
 // can be used to configure custom data objects in separate file instead
@@ -41,7 +41,7 @@ float32_t i_high_value = 0; //store value of ihigh (app task)
 
 float32_t temp_value = 0; //store value of temperature (app task)
 
-float32_t reference_value = 0; //store value of reference (master-slave mode)
+float32_t can_reference_value = 0; //store value of reference (master-slave mode)
 
 bool ctrl_enable = false; //store value of the enable (master-slave mode)
 
@@ -190,7 +190,7 @@ static ThingSetDataObject data_objects[] = {
                 "en": "Current control target"
             }
         }*/
-        TS_ITEM_FLOAT(0x8001, "zCtrl_Reference", &reference_value, 1,
+        TS_ITEM_FLOAT(0x8001, "zCtrl_Reference", &can_reference_value, 1,
             ID_CTRL, TS_ANY_RW, SUBSET_CTRL),
 
         /*{

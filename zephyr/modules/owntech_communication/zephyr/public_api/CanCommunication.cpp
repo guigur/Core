@@ -53,7 +53,7 @@ bool CanCommunication::getCtrlEnable()
 
 float32_t CanCommunication::getCtrlReference()
 {
-    return reference_value;
+    return can_reference_value;
 }
 
 uint16_t CanCommunication::getBroadcastPeriod()
@@ -79,7 +79,7 @@ void CanCommunication::setCtrlEnable(bool enable)
 
 void CanCommunication::setCtrlReference(float32_t reference)
 {
-    reference_value = reference;
+    can_reference_value = reference;
 }
 
 void CanCommunication::setBroadcastPeriod(uint16_t time_100_ms)

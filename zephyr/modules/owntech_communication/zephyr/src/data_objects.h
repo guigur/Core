@@ -46,7 +46,7 @@
 
 extern bool      ctrl_enable;
 extern uint16_t  can_node_addr;
-extern float32_t reference_value;
+extern float32_t can_reference_value;
 
 /*
  * Modifiers
