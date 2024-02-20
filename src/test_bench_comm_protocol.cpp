@@ -103,6 +103,21 @@ uint8_t received_char;
 char bufferstr[255]={};
 bool print_done = false;
 
+/* RS485 test parameters*/
+uint8_t rs485_send;
+uint8_t rs485_receive;
+
+/* Sync test parameters*/
+uint8_t sync_master_counter = 0;
+
+/* BOOL value for testing */
+bool test_start = false; // start the test after a certain period of time
+bool RS485_success = false;
+bool Sync_success = false;
+bool Analog_success = false;
+bool Can_success = false;
+
+
 
 void console_read_line()
 {
@@ -290,7 +305,7 @@ void powerLegSettingsHandler() {
     printk("unknown power command %s\n", bufferstr);
 }
 
-void reception_function(void)
+void slave_reception_function(void)
 {
     if (GET_ID(rx_consigne.id_and_status) == 1)
     {
@@ -306,5 +321,25 @@ void reception_function(void)
         tx_consigne.id_and_status = tx_consigne.id_and_status | (1 << 7);
 
         rs485Communication.startTransmission();
+    }
+}
+
+void master_reception_function(void)
+{
+    if ( GET_ID(rx_consigne.id_and_status) == 2)
+    {
+        analog_value = rx_consigne.analog_value_measure;
+        rs485_receive = rx_consigne.test_RS485;
+    }
+
+    if(test_start && (rs485_receive == rs485_send + 1)) RS485_success = true;
+
+    if(test_start && RS485_success && (analog_value - analog_value_ref > 50 || analog_value - analog_value_ref > -50)) Analog_success = true;
+
+    if(test_start && RS485_success && (sync_master_counter < 5 && rx_consigne.test_Sync == 10))
+    {
+        sync_master_counter++;
+        if(sync_master_counter == 5) Sync_success = true;
+
     }
 }

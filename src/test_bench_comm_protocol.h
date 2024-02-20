@@ -138,6 +138,21 @@ extern uint8_t* buffer_rx;
 extern uint8_t status;
 extern uint32_t counter_time;
 
+/* RS485 test parameters*/
+extern uint8_t rs485_send;
+extern uint8_t rs485_receive;
+
+/* Sync test parameters*/
+extern uint8_t sync_master_counter;
+
+/* BOOL value for testing */
+extern bool test_start     ; // start the test after a certain period of time
+extern bool RS485_success  ;
+extern bool Sync_success   ;
+extern bool Analog_success ;
+extern bool Can_success    ;
+
+
 /* analog test parameters*/
 extern uint16_t analog_value;
 extern uint16_t analog_value_ref;
@@ -164,7 +179,8 @@ void referenceHandler(uint8_t power_leg, uint8_t setting_position);
 
 void calibrationHandler();
 
-void reception_function();
+void slave_reception_function();
 
+void master_reception_function();
 
 #endif  //TEST_BENCH_COMM_PROTOCOL_H
