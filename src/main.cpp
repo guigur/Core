@@ -81,6 +81,10 @@ void setup_software()
 {
     data.enableTwistDefaultChannels();
 
+    canCommunication.setCanNodeAddr(CAN_MASTER_ADDR);
+    canCommunication.setBroadcastPeriod(10);
+    canCommunication.setControlPeriod(10);
+
     spin.dac.initConstValue(2);
 
     task.createCritical(&loop_control_task, control_task_period);
@@ -183,6 +187,8 @@ void loop_application_task()
 void loop_control_task()
 {
     spin.dac.setConstValue(2, 1, analog_value_ref);
+    canCommunication.setCtrlEnable(true);
+    canCommunication.setCtrlReference(CAN_Bus_receive_ref);
 
 
     switch(mode){
