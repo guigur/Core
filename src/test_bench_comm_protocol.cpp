@@ -312,17 +312,13 @@ void slave_reception_function(void)
     tx_consigne.test_Sync = ctrl_slave_counter;
     tx_consigne.analog_value_measure = analog_value;
 
-        rs485Communication.startTransmission();
-    }
+    rs485Communication.startTransmission();
 }
 
 void master_reception_function(void)
 {
-    if ( GET_ID(rx_consigne.id_and_status) == 2)
-    {
-        analog_value = rx_consigne.analog_value_measure;
-        rs485_receive = rx_consigne.test_RS485;
-    }
+    analog_value = rx_consigne.analog_value_measure;
+    rs485_receive = rx_consigne.test_RS485;
 
     if(test_start && (rs485_receive == rs485_send + 1)) RS485_success = true;
     if(test_start && RS485_success && (analog_value - analog_value_ref > 50 || analog_value - analog_value_ref > -50)) Analog_success = true;
