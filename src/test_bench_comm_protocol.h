@@ -71,52 +71,64 @@ typedef enum
 
 extern tester_states_t mode;
 
-// Define a struct to hold the tracking variables and their names
+/**
+ * @brief Structure representing tracking variables and their information.
+ *
+ * This structure holds the name, memory address, and channel reference of tracking variables.
+ */
 typedef struct {
-    const char *name;
-    float32_t *address;
-    channel_t channel_reference;
+    const char *name;           /**< Name of the tracking variable */
+    float32_t *address;         /**< Memory address of the tracking variable */
+    channel_t channel_reference; /**< Channel reference of the tracking variable */
 } TrackingVariables;
-
-// Define a struct to hold the settings of each power leg
-// settings ----
-// bool leg_on    - to define if the leg is ON or OFF
-// bool capa_on   - to define if the capacitor of the leg is ON or OFF
-// bool driver_on - to define if the driver of the leg is ON or OFF
-// bool buck_mode - to define is the leg is in buck mode
-// bool boost_mode - to define is the leg is in boost mode
-// switches ----
-// pin_t CAPA_SWITCH    - holds the pin of the capa
-// pint_t DRIVER_SWITCH - holds the pin of the driver
+/**
+ * @brief Structure representing the settings of a power leg.
+ *
+ * This structure holds various settings related to a power leg, including boolean settings, switches,
+ * tracking variable information, reference value, and duty cycle.
+ */
 typedef struct {
-    bool settings[5];
-    pin_t switches[2];
-    float32_t *tracking_variable;
-    const char *tracking_var_name;
-    float32_t reference_value;
-    float32_t duty_cycle;
+    bool settings[5];               /**< Array of boolean settings */
+    pin_t switches[2];              /**< Array of switches */
+    float32_t *tracking_variable;   /**< Pointer to the tracking variable */
+    const char *tracking_var_name;  /**< Name of the tracking variable */
+    float32_t reference_value;      /**< Reference value */
+    float32_t duty_cycle;           /**< Duty cycle value */
 } PowerLegSettings;
 
+/**
+ * @brief Structure representing a command mapping to settings.
+ *
+ * This structure maps a command string to a corresponding function pointer that handles the settings for a power leg.
+ */
 typedef struct {
-    char cmd[16];
-    void (*func)(uint8_t power_leg, uint8_t setting_position);
+    char cmd[16];                               /**< Command string */
+    void (*func)(uint8_t power_leg, uint8_t setting_position); /**< Function pointer to handle the settings */
 } cmdToSettings_t;
 
 
+/**
+ * @brief Structure representing a command mapping to state.
+ *
+ * This structure maps a command string to a tester state.
+ */
 typedef struct {
-    char cmd[16];
-    tester_states_t mode;
+    char cmd[16];             /**< Command string */
+    tester_states_t mode;    /**< Tester state */
 } cmdToState_t;
 
 
+/**
+ * @brief Structure representing various measurements and statuses.
+ *
+ * This structure holds variables for testing RS485, Sync, analog measurements, and status information.
+ */
 typedef struct {
-    uint8_t buf_vab[3];    // Contains Voltage DATA A and Voltage DATA B
-    uint8_t test_RS485;    // variable for testing RS485
-    uint8_t test_Sync;    // variable for testing Sync
-    uint16_t analog_value_measure; // Contains analog measure
-    uint8_t id_and_status; // Contains status
-} ConsigneStruct_t ;
-
+    uint8_t test_RS485;             /**< Variable for testing RS485 */
+    uint8_t test_Sync;              /**< Variable for testing Sync */
+    uint16_t analog_value_measure;  /**< Analog measurement */
+    uint8_t id_and_status;          /**< Status information */
+} ConsigneStruct_t;
 
 extern TrackingVariables tracking_vars[6];
 extern PowerLegSettings power_leg_settings[2];
@@ -165,22 +177,88 @@ extern bool print_done;
 extern float32_t reference_value;
 
 //----------------SERIAL PROTOCOL HANDLER FUNCTIONS---------------------
+
+/**
+ * @brief Reads a line from the console input.
+ *
+ * This function reads characters from the console input until a newline character ('\n') is encountered.
+ * It stores the characters in the global bufferstr variable.
+ */
 void console_read_line();
 
+/**
+ * @brief Handles default commands.
+ *
+ * This function handles default commands by matching the received command with predefined default commands and executing corresponding actions.
+ *
+ */
 void defaultHandler();
 
+/**
+ * @brief Handles power leg settings commands.
+ *
+ * This function determines the power leg based on the received message and delegates the command handling to specific setting handlers.
+ * The command format is expected to be "_LEGX_<setting>_XXXXX", where X represents the specific setting value.
+ *
+ */
 void powerLegSettingsHandler();
 
+/**
+ * @brief Handles boolean settings for a power leg.
+ *
+ * This function extracts boolean settings from the received command and updates the corresponding power leg settings.
+ * The command format is expected to be "_LEGX_l_on" or "_LEGX_l_off", where "on" turns the setting on and "off" turns it off.
+ *
+ * @param power_leg The index of the power leg.
+ * @param setting_position The position of the boolean setting in the power leg settings array.
+ */
 void boolSettingsHandler(uint8_t power_leg, uint8_t setting_position);
 
+/**
+ * @brief Handles duty cycle settings for a power leg.
+ *
+ * This function extracts the duty cycle value from the received command and updates the corresponding power leg settings.
+ * The duty cycle value is expected to be in the format "_LEGX_d_XXXXX", where XXXXX represents the duty cycle value.
+ *
+ * @param power_leg The index of the power leg.
+ * @param setting_position The position of the duty cycle setting in the power leg settings array.
+ */
 void dutyHandler(uint8_t power_leg, uint8_t setting_position);
 
+/**
+ * @brief Handles reference value settings for a power leg.
+ *
+ * This function extracts the reference value from the received command and updates the corresponding power leg settings.
+ * The reference value is expected to be in the format "_LEGX_r_XXXXX", where XXXXX represents the reference value.
+ *
+ * @param power_leg The index of the power leg.
+ * @param setting_position The position of the reference value setting in the power leg settings array.
+ */
 void referenceHandler(uint8_t power_leg, uint8_t setting_position);
 
+/**
+ * @brief Handles calibration settings.
+ *
+ * This function extracts the variable name, gain, and offset from the received command and updates the calibration parameters.
+ * The command format is expected to be "_VX_g_XX.XXXXX_o_XX.XXXXX", where VX represents the variable name, XX.XXXXX represents the gain,
+ * and XX.XXXXX represents the offset.
+ */
 void calibrationHandler();
 
-void slave_reception_function();
+/**
+ * @brief Handles slave reception.
+ *
+ * This function receives data from the slave device, processes it, and prepares a response.
+ * It updates various variables and starts transmission over the RS485 communication interface.
+ */
+void slave_reception_function(void);
 
-void master_reception_function();
+/**
+ * @brief Handles master reception.
+ *
+ * This function receives data from the master device, processes it, and updates relevant variables.
+ * It checks for various conditions to determine the success of data reception and synchronization.
+ */
+void master_reception_function(void);
 
 #endif  //TEST_BENCH_COMM_PROTOCOL_H
