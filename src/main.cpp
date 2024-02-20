@@ -39,8 +39,8 @@
 
 //----------- USER INCLUDE ----------------------
 
-#define GET_ID(x) ((x >> 6) & 0x3)        // retrieve identifiant
-#define GET_STATUS(x) (x & 1) // check the status (IDLE MODE or POWER MODE)
+// #define GET_ID(x) ((x >> 6) & 0x3)        // retrieve identifiant
+// #define GET_STATUS(x) (x & 1) // check the status (IDLE MODE or POWER MODE)
 
 //-------------LOOP FUNCTIONS DECLARATION----------------------
 void loop_communication_task(); // code to be executed in the slow communication task
@@ -56,27 +56,27 @@ static bool pwm_enable = false;            //[bool] state of the PWM (ctrl task)
 
 uint8_t received_serial_char;
 
-struct consigne_struct
-{
-    uint8_t buf_vab[3];    // Contains Voltage DATA A and Voltage DATA B
-    uint8_t test_RS485;    // variable for testing RS485
-    uint8_t test_Sync;    // variable for testing Sync
-    uint16_t analog_value_measure; // Contains analog measure
-    uint8_t id_and_status; // Contains status
-};
+// struct consigne_struct
+// {
+//     uint8_t buf_vab[3];    // Contains Voltage DATA A and Voltage DATA B
+//     uint8_t test_RS485;    // variable for testing RS485
+//     uint8_t test_Sync;    // variable for testing Sync
+//     uint16_t analog_value_measure; // Contains analog measure
+//     uint8_t id_and_status; // Contains status
+// };
 
 // Future work : replace union
-struct consigne_struct tx_consigne;
-struct consigne_struct rx_consigne;
-uint8_t* buffer_tx = (uint8_t*)&tx_consigne;
-uint8_t* buffer_rx =(uint8_t*)&rx_consigne;
+// struct consigne_struct tx_consigne;
+// struct consigne_struct rx_consigne;
+// uint8_t* buffer_tx = (uint8_t*)&tx_consigne;
+// uint8_t* buffer_rx =(uint8_t*)&rx_consigne;
 
-uint8_t status;
-uint32_t counter_time = 0;
+// uint8_t status;
+// uint32_t counter_time = 0;
 
-/* analog test parameters*/
-uint16_t analog_value;
-uint16_t analog_value_ref = 1000;
+// /* analog test parameters*/
+// uint16_t analog_value;
+// uint16_t analog_value_ref = 1000;
 
 /* RS485 test parameters*/
 static uint8_t rs485_send;
