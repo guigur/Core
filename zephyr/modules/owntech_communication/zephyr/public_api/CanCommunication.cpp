@@ -77,7 +77,7 @@ void CanCommunication::setCtrlEnable(bool enable)
     ctrl_enable = enable;
 }
 
-void CanCommunication::setCtrlReference(float32_t reference)
+void CanCommunication::setCtrlReference(uint16_t reference)
 {
     can_reference_value = reference;
 }
