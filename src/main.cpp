@@ -109,9 +109,13 @@ void setup_routine()
     spin.version.setBoardVersion(SPIN_v_0_9);
     twist.initLegBuck(LEG1);
     twist.initLegBuck(LEG2);
+
     syncCommunication.initSlave(); // start the synchronisation
     data.enableAcquisition(2, 35); // enable the analog measurement
     data.triggerAcquisition(2);     // starts the analog measurement
+    canCommunication.setCanNodeAddr(CAN_SLAVE_ADDR);
+    canCommunication.setBroadcastPeriod(10);
+    canCommunication.setControlPeriod(10);
 
 
     spin.gpio.configurePin(LEG1_CAPA_DGND, OUTPUT);
@@ -287,6 +291,9 @@ void loop_control_task()
     analog_value = data.getLatest(2, 35);
 
     ctrl_slave_counter++; //counter for the slave function
+
+    can_test_ctrl_enable = canCommunication.getCtrlEnable();
+    can_test_reference_value = canCommunication.getCtrlReference();
 
 
     switch(mode){
