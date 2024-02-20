@@ -34,6 +34,7 @@
 #include "DataAPI.h"
 #include "Rs485Communication.h"
 #include "SyncCommunication.h"
+#include "CanCommunication.h"
 
 
 #include "zephyr/console/console.h"
@@ -44,6 +45,9 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+
+#define CAN_MASTER_ADDR 0x50
+#define CAN_SLAVE_ADDR 0x60
 
 #define BOOL_SETTING_OFF 0
 #define BOOL_SETTING_ON 1
@@ -126,6 +130,8 @@ typedef struct {
 typedef struct {
     uint8_t test_RS485;             /**< Variable for testing RS485 */
     uint8_t test_Sync;              /**< Variable for testing Sync */
+    uint16_t test_CAN;             /**< Variable for testing the CAN Bus */
+    bool test_bool_CAN;             /**< Boolean variable for testing the CAN Bus */
     uint16_t analog_value_measure;  /**< Analog measurement */
     uint8_t id_and_status;          /**< Status information */
 } ConsigneStruct_t;
@@ -154,8 +160,6 @@ extern uint32_t counter_time;
 extern uint8_t rs485_send;
 extern uint8_t rs485_receive;
 
-/* Sync test parameters*/
-extern uint8_t sync_master_counter;
 
 /* BOOL value for testing */
 extern bool test_start     ; // start the test after a certain period of time
@@ -170,11 +174,22 @@ extern uint16_t analog_value;
 extern uint16_t analog_value_ref;
 
 /* Sync test parameters*/
+extern uint8_t sync_master_counter;
 extern uint8_t ctrl_slave_counter;
 
-extern bool print_done;
+/* CAN Bus test parameters*/
+extern bool can_test_ctrl_enable;
+extern uint16_t can_test_reference_value;
+
+
+/* CAN Bus test master parameters*/
+extern uint16_t CAN_Bus_receive;
+extern uint16_t CAN_Bus_receive_ref;
+extern bool CAN_Bus_bool_receive;
 
 extern float32_t reference_value;
+
+extern bool print_done;
 
 //----------------SERIAL PROTOCOL HANDLER FUNCTIONS---------------------
 
