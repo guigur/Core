@@ -133,13 +133,7 @@ void loop_application_task()
             if(!print_done) {
                 printk("IDLE \n");
                 print_done = true;
-
-                tx_consigne.id_and_status = (1 << 6) + 0;
-                rs485_send = 0;
-                tx_consigne.test_RS485 = rs485_send ;
-                rs485Communication.startTransmission();
             }
-
             break;
         case POWER_OFF:
             spin.led.toggle();
@@ -147,16 +141,19 @@ void loop_application_task()
                 printk("POWER OFF \n");
                 print_done = true;
             }
-            printk("[%d,%d,%d,%d,%d]:", power_leg_settings[LEG1].settings[0], power_leg_settings[LEG1].settings[1], power_leg_settings[LEG1].settings[2], power_leg_settings[LEG1].settings[3], power_leg_settings[LEG1].settings[4]);
+            printk("{%u,%u,%u,%u}:", RS485_success,
+                                     Sync_success,
+                                     Analog_success,
+                                     Can_success);
+            printk("[%d,%d,%d,%d,%d]:", power_leg_settings[LEG1].settings[0],
+                                        power_leg_settings[LEG1].settings[1],
+                                        power_leg_settings[LEG1].settings[2],
+                                        power_leg_settings[LEG1].settings[3],
+                                        power_leg_settings[LEG1].settings[4]);
             printk("%f:", power_leg_settings[LEG1].duty_cycle);
             printk("%f:", power_leg_settings[LEG1].reference_value);
             printk("%s:", power_leg_settings[LEG1].tracking_var_name);
             printk("%f:", tracking_vars[LEG1].address[0]);
-            printk("[%d,%d,%d,%d,%d]:", power_leg_settings[LEG2].settings[0], power_leg_settings[LEG2].settings[1], power_leg_settings[LEG2].settings[2], power_leg_settings[LEG2].settings[3], power_leg_settings[LEG2].settings[4]);
-            printk("%f:", power_leg_settings[LEG2].duty_cycle);
-            printk("%f:", power_leg_settings[LEG2].reference_value);
-            printk("%s:", power_leg_settings[LEG2].tracking_var_name);
-            printk("%f:", tracking_vars[LEG2].address[0]);
             printk("\n");
             break;
         case POWER_ON:
@@ -165,10 +162,6 @@ void loop_application_task()
                 printk("POWER ON \n");
                 print_done = true;
             }
-            printk("%u:", RS485_success);
-            printk("%u:", Sync_success);
-            printk("%u:", Analog_success);
-            printk("%u:", Can_success);
             printk("%f:", power_leg_settings[LEG1].duty_cycle);
             printk("%f:", power_leg_settings[LEG2].duty_cycle);
             printk("\n");
@@ -194,27 +187,35 @@ void loop_control_task()
 
     switch(mode){
         case IDLE:
-        case POWER_OFF:
             twist.stopLeg(LEG1);
             twist.stopLeg(LEG2);
             pwm_enable_leg_1 = false;
             pwm_enable_leg_2 = false;
+
             break;
 
-        case POWER_ON:
+        case POWER_OFF:
 
-                /* Voltage reference */
+            twist.stopLeg(LEG1);
+            twist.stopLeg(LEG2);
+            pwm_enable_leg_1 = false;
+            pwm_enable_leg_2 = false;
+
+            /* Voltage reference */
             rs485_send++;
 
             /* writting rs485 value */
             tx_consigne.test_RS485 = rs485_send;
 
-            tx_consigne.id_and_status = (1 << 6) + 1;
-
             rs485Communication.startTransmission();
 
             counter_time++;
             if (counter_time > 50) test_start =  true;
+
+            break;
+
+        case POWER_ON:
+
 
             if(!pwm_enable_leg_1 && power_leg_settings[LEG1].settings[BOOL_LEG]) {twist.startLeg(LEG1); pwm_enable_leg_1 = true;}
             if(!pwm_enable_leg_2 && power_leg_settings[LEG2].settings[BOOL_LEG]) {twist.startLeg(LEG2); pwm_enable_leg_2 = true;}
