@@ -110,6 +110,9 @@ void setup_routine()
     twist.initLegBuck(LEG1);
     twist.initLegBuck(LEG2);
     syncCommunication.initSlave(); // start the synchronisation
+    data.enableAcquisition(2, 35); // enable the analog measurement
+    data.triggerAcquisition(2);     // starts the analog measurement
+
 
     spin.gpio.configurePin(LEG1_CAPA_DGND, OUTPUT);
     spin.gpio.configurePin(LEG2_CAPA_DGND, OUTPUT);
@@ -153,7 +156,7 @@ void setup_routine()
     task.startBackground(CommTask_num);
     task.startCritical();
 
-    rs485Communication.configure(buffer_tx, buffer_rx, sizeof(ConsigneStruct_t), reception_function, 10625000, true); // custom configuration for RS485
+    rs485Communication.configure(buffer_tx, buffer_rx, sizeof(ConsigneStruct_t), slave_reception_function, 10625000, true); // custom configuration for RS485
 
 }
 
@@ -203,12 +206,20 @@ void loop_application_task()
                 printk("POWER OFF \n");
                 print_done = true;
             }
-            printk("[%d,%d,%d,%d,%d]:", power_leg_settings[LEG1].settings[0], power_leg_settings[LEG1].settings[1], power_leg_settings[LEG1].settings[2], power_leg_settings[LEG1].settings[3], power_leg_settings[LEG1].settings[4]);
+            printk("[%d,%d,%d,%d,%d]:", power_leg_settings[LEG1].settings[0],
+                                        power_leg_settings[LEG1].settings[1],
+                                        power_leg_settings[LEG1].settings[2],
+                                        power_leg_settings[LEG1].settings[3],
+                                        power_leg_settings[LEG1].settings[4]);
             printk("%f:", power_leg_settings[LEG1].duty_cycle);
             printk("%f:", power_leg_settings[LEG1].reference_value);
             printk("%s:", power_leg_settings[LEG1].tracking_var_name);
             printk("%f:", tracking_vars[LEG1].address[0]);
-            printk("[%d,%d,%d,%d,%d]:", power_leg_settings[LEG2].settings[0], power_leg_settings[LEG2].settings[1], power_leg_settings[LEG2].settings[2], power_leg_settings[LEG2].settings[3], power_leg_settings[LEG2].settings[4]);
+            printk("[%d,%d,%d,%d,%d]:", power_leg_settings[LEG2].settings[0],
+                                        power_leg_settings[LEG2].settings[1],
+                                        power_leg_settings[LEG2].settings[2],
+                                        power_leg_settings[LEG2].settings[3],
+                                        power_leg_settings[LEG2].settings[4]);
             printk("%f:", power_leg_settings[LEG2].duty_cycle);
             printk("%f:", power_leg_settings[LEG2].reference_value);
             printk("%s:", power_leg_settings[LEG2].tracking_var_name);
@@ -269,6 +280,13 @@ void loop_control_task()
     meas_data = data.getLatest(I_HIGH);
     if (meas_data != NO_VALUE)
         I_high_value = meas_data;
+
+
+    /* Analog communication value */
+    data.triggerAcquisition(2);
+    analog_value = data.getLatest(2, 35);
+
+    ctrl_slave_counter++; //counter for the slave function
 
 
     switch(mode){
