@@ -32,11 +32,18 @@
 #include "TaskAPI.h"
 #include "TwistAPI.h"
 #include "DataAPI.h"
+#include "Rs485Communication.h"
+#include "SyncCommunication.h"
 
-#define LEG1_CAPA_DGND PC6
-#define LEG2_CAPA_DGND PB7
-#define LEG1_DRIVER_SWITCH PC12
-#define LEG2_DRIVER_SWITCH PB13
+
+#include "zephyr/console/console.h"
+#include "zephyr/zephyr.h"
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
+
 
 #define BOOL_SETTING_OFF 0
 #define BOOL_SETTING_ON 1
@@ -50,13 +57,19 @@
 #define CAPA_SWITCH_INDEX 0
 #define DRIVER_SWITCH_INDEX 1
 
+#define GET_ID(x) ((x >> 6) & 0x3)        // retrieve identifiant
+#define GET_STATUS(x) (x & 1) // check the status (IDLE MODE or POWER MODE)
+
+extern uint8_t received_serial_char;
+extern uint8_t received_char;
+extern char bufferstr[255];
 
 typedef enum
 {
     IDLE, POWER_ON, POWER_OFF
 } tester_states_t;
 
-uint8_t mode = IDLE;
+extern tester_states_t mode;
 
 // Define a struct to hold the tracking variables and their names
 typedef struct {
@@ -96,7 +109,45 @@ typedef struct {
 } cmdToState_t;
 
 
+typedef struct {
+    uint8_t buf_vab[3];    // Contains Voltage DATA A and Voltage DATA B
+    uint8_t test_RS485;    // variable for testing RS485
+    uint8_t test_Sync;    // variable for testing Sync
+    uint16_t analog_value_measure; // Contains analog measure
+    uint8_t id_and_status; // Contains status
+} ConsigneStruct_t ;
 
+
+extern TrackingVariables tracking_vars[6];
+extern PowerLegSettings power_leg_settings[2];
+extern cmdToSettings_t power_settings[7];
+extern cmdToState_t default_commands[3];
+
+extern tester_states_t mode;
+extern uint8_t num_tracking_vars;
+extern uint8_t num_power_settings;
+extern uint8_t num_default_commands;
+
+extern ConsigneStruct_t tx_consigne;
+extern ConsigneStruct_t rx_consigne;
+
+extern uint8_t* buffer_tx;
+extern uint8_t* buffer_rx;
+
+
+extern uint8_t status;
+extern uint32_t counter_time;
+
+/* analog test parameters*/
+extern uint16_t analog_value;
+extern uint16_t analog_value_ref;
+
+/* Sync test parameters*/
+extern uint8_t ctrl_slave_counter;
+
+extern bool print_done;
+
+extern float32_t reference_value;
 
 //----------------SERIAL PROTOCOL HANDLER FUNCTIONS---------------------
 void console_read_line();
@@ -113,6 +164,7 @@ void referenceHandler(uint8_t power_leg, uint8_t setting_position);
 
 void calibrationHandler();
 
+void reception_function();
 
 
 #endif  //TEST_BENCH_COMM_PROTOCOL_H

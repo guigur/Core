@@ -30,8 +30,6 @@
 
 #include "test_bench_comm_protocol.h"
 
-
-
 extern float32_t V1_low_value;
 extern float32_t V2_low_value;
 extern float32_t I1_low_value;
@@ -39,7 +37,12 @@ extern float32_t I2_low_value;
 extern float32_t I_high_value;
 extern float32_t V_high_value;
 
-tester_states_t mode = IDLE;
+// extern tester_states_t mode;
+// extern TrackingVariables tracking_vars;
+// extern PowerLegSettings power_leg_settings;
+// extern cmdToSettings_t power_settings;
+
+float32_t reference_value = 0.0;
 
 // Declare the tracking variable struct
 TrackingVariables tracking_vars[] = {
@@ -53,14 +56,9 @@ TrackingVariables tracking_vars[] = {
 
 PowerLegSettings power_leg_settings[] = {
     //   LEG_OFF      ,   CAPA_OFF      , DRIVER_OFF      ,  BUCK_MODE_ON,  BOOST_MODE_ON
-    {{BOOL_SETTING_OFF, BOOL_SETTING_OFF, BOOL_SETTING_OFF,  BOOL_SETTING_OFF,  BOOL_SETTING_OFF}, {LEG1_CAPA_DGND, LEG1_DRIVER_SWITCH},  &V1_low_value, "V1", reference_value, starting_duty_cycle},
-    {{BOOL_SETTING_OFF, BOOL_SETTING_OFF, BOOL_SETTING_OFF,  BOOL_SETTING_OFF,  BOOL_SETTING_OFF}, {LEG2_CAPA_DGND, LEG2_DRIVER_SWITCH},  &V2_low_value, "V2",reference_value, starting_duty_cycle}
+    {{BOOL_SETTING_OFF, BOOL_SETTING_OFF, BOOL_SETTING_OFF,  BOOL_SETTING_OFF,  BOOL_SETTING_OFF}, {LEG1_CAPA_DGND, LEG1_DRIVER_SWITCH},  &V1_low_value, "V1", reference_value, 0.1},
+    {{BOOL_SETTING_OFF, BOOL_SETTING_OFF, BOOL_SETTING_OFF,  BOOL_SETTING_OFF,  BOOL_SETTING_OFF}, {LEG2_CAPA_DGND, LEG2_DRIVER_SWITCH},  &V2_low_value, "V2",reference_value, 0.1}
 };
-
-typedef struct {
-    char cmd[16];
-    void (*func)(uint8_t power_leg, uint8_t setting_position);
-} cmdToSettings_t;
 
 cmdToSettings_t power_settings[] = {
     {"_l", boolSettingsHandler},
@@ -72,16 +70,38 @@ cmdToSettings_t power_settings[] = {
     {"_d", dutyHandler},
 };
 
-
 cmdToState_t default_commands[] = {
     {"_i", IDLE},
     {"_f", POWER_OFF},
     {"_o", POWER_ON},
 };
 
+tester_states_t mode = IDLE;
+
 uint8_t num_tracking_vars = sizeof(tracking_vars)/sizeof(tracking_vars[0]);
 uint8_t num_power_settings =  sizeof(power_settings)/sizeof(power_settings[0]);
 uint8_t num_default_commands = sizeof(default_commands)/sizeof(default_commands[0]);
+
+ConsigneStruct_t tx_consigne;
+ConsigneStruct_t rx_consigne;
+uint8_t* buffer_tx = (uint8_t*)&tx_consigne;
+uint8_t* buffer_rx =(uint8_t*)&rx_consigne;
+
+uint8_t status;
+uint32_t counter_time=0;
+
+/* analog test parameters*/
+uint16_t analog_value;
+uint16_t analog_value_ref=1000;
+
+/* Sync test parameters*/
+uint8_t ctrl_slave_counter=0;
+
+
+uint8_t received_serial_char;
+uint8_t received_char;
+char bufferstr[255]={};
+bool print_done = false;
 
 
 void console_read_line()
@@ -160,7 +180,7 @@ void referenceHandler(uint8_t power_leg, uint8_t setting_position){
 
 
 
-void calibrationHandler(char *bufferstr) {
+void calibrationHandler() {
     const char *underscore1 = strchr(bufferstr + 1, '_');
     if (underscore1 != NULL) {
         // Find the position of the next underscore after the first underscore
@@ -268,4 +288,23 @@ void powerLegSettingsHandler() {
         }
     }
     printk("unknown power command %s\n", bufferstr);
+}
+
+void reception_function(void)
+{
+    if (GET_ID(rx_consigne.id_and_status) == 1)
+    {
+        status = rx_consigne.id_and_status;
+
+        tx_consigne = rx_consigne;
+        tx_consigne.test_RS485 = rx_consigne.test_RS485 + 1;
+        tx_consigne.test_Sync = ctrl_slave_counter;
+
+        tx_consigne.analog_value_measure = analog_value;
+
+        tx_consigne.id_and_status = tx_consigne.id_and_status & ~(1 << 6);
+        tx_consigne.id_and_status = tx_consigne.id_and_status | (1 << 7);
+
+        rs485Communication.startTransmission();
+    }
 }
