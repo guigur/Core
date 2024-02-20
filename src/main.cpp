@@ -32,6 +32,8 @@
 #include "TaskAPI.h"
 #include "TwistAPI.h"
 #include "DataAPI.h"
+#include "Rs485Communication.h"
+#include "SyncCommunication.h"
 
 
 #include "opalib_control_pid.h"
@@ -63,6 +65,9 @@
 
 #define CAPA_SWITCH_INDEX 0
 #define DRIVER_SWITCH_INDEX 1
+
+#define GET_ID(x) ((x >> 6) & 0x3)        // retrieve identifiant
+#define GET_STATUS(x) (x & 1) // check the status (IDLE MODE or POWER MODE)
 
 // #define LEG1 0
 // #define LEG2 1
@@ -235,6 +240,53 @@ cmdToState_t default_commands[] = {
 
 uint8_t num_default_commands = sizeof(default_commands)/sizeof(default_commands[0]);
 
+// -------------COMMUNICATION TEST PARAMETERS------------------------------------
+
+struct consigne_struct
+{
+    uint8_t buf_vab[3];    // Contains Voltage DATA A and Voltage DATA B
+    uint8_t test_RS485;    // variable for testing RS485
+    uint8_t test_Sync;    // variable for testing Sync
+    uint16_t analog_value_measure; // Contains analog measure
+    uint8_t id_and_status; // Contains status
+};
+
+// Future work : replace union
+struct consigne_struct tx_consigne;
+struct consigne_struct rx_consigne;
+uint8_t* buffer_tx = (uint8_t*)&tx_consigne;
+uint8_t* buffer_rx =(uint8_t*)&rx_consigne;
+
+uint8_t status;
+uint32_t counter_time = 0;
+
+/* analog test parameters*/
+uint16_t analog_value;
+uint16_t analog_value_ref = 1000;
+
+
+/* Sync test parameters*/
+static uint8_t ctrl_slave_counter = 0;
+
+//---------------------COMM TEST -----------------------------------------------------------
+void reception_function(void)
+{
+    if (GET_ID(rx_consigne.id_and_status) == 1)
+    {
+        status = rx_consigne.id_and_status;
+
+        tx_consigne = rx_consigne;
+        tx_consigne.test_RS485 = rx_consigne.test_RS485 + 1;
+        tx_consigne.test_Sync = ctrl_slave_counter;
+
+        tx_consigne.analog_value_measure = analog_value;
+
+        tx_consigne.id_and_status = tx_consigne.id_and_status & ~(1 << 6);
+        tx_consigne.id_and_status = tx_consigne.id_and_status | (1 << 7);
+
+        rs485Communication.startTransmission();
+    }
+}
 
 
 //---------------------------------------------------------------
@@ -435,6 +487,7 @@ void setup_routine()
     spin.version.setBoardVersion(SPIN_v_0_9);
     twist.initLegBuck(LEG1);
     twist.initLegBuck(LEG2);
+    syncCommunication.initSlave(); // start the synchronisation
 
     spin.gpio.configurePin(LEG1_CAPA_DGND, OUTPUT);
     spin.gpio.configurePin(LEG2_CAPA_DGND, OUTPUT);
@@ -477,6 +530,9 @@ void setup_routine()
     task.startBackground(AppTask_num);
     task.startBackground(CommTask_num);
     task.startCritical();
+
+    rs485Communication.configure(buffer_tx, buffer_rx, sizeof(consigne_struct), reception_function, 10625000, true); // custom configuration for RS485
+
 }
 
 //---------------LOOP FUNCTIONS----------------------------------
