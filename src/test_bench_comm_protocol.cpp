@@ -307,30 +307,24 @@ void powerLegSettingsHandler() {
 
 void slave_reception_function(void)
 {
-    if (GET_ID(rx_consigne.id_and_status) == 1)
-    {
-        status = rx_consigne.id_and_status;
+    status = rx_consigne.id_and_status;
 
-        tx_consigne = rx_consigne;
-        tx_consigne.test_RS485 = rx_consigne.test_RS485 + 1;
-        tx_consigne.test_Sync = ctrl_slave_counter;
+    tx_consigne = rx_consigne;
+    tx_consigne.test_RS485 = rx_consigne.test_RS485 + 1;
+    tx_consigne.test_Sync = ctrl_slave_counter;
 
-        tx_consigne.analog_value_measure = analog_value;
+    tx_consigne.analog_value_measure = analog_value;
 
-        tx_consigne.id_and_status = tx_consigne.id_and_status & ~(1 << 6);
-        tx_consigne.id_and_status = tx_consigne.id_and_status | (1 << 7);
+    tx_consigne.id_and_status = tx_consigne.id_and_status & ~(1 << 6);
+    tx_consigne.id_and_status = tx_consigne.id_and_status | (1 << 7);
 
-        rs485Communication.startTransmission();
-    }
+    rs485Communication.startTransmission();
 }
 
 void master_reception_function(void)
 {
-    if ( GET_ID(rx_consigne.id_and_status) == 2)
-    {
-        analog_value = rx_consigne.analog_value_measure;
-        rs485_receive = rx_consigne.test_RS485;
-    }
+    analog_value = rx_consigne.analog_value_measure;
+    rs485_receive = rx_consigne.test_RS485;
 
     if(test_start && (rs485_receive == rs485_send + 1)) RS485_success = true;
 
