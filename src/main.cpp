@@ -28,19 +28,9 @@
  */
 
 //--------------OWNTECH APIs----------------------------------
-#include "DataAPI.h"
-#include "TaskAPI.h"
-#include "TwistAPI.h"
-#include "SpinAPI.h"
-#include "Rs485Communication.h"
-#include "SyncCommunication.h"
-
-#include "zephyr/console/console.h"
+#include "test_bench_comm_protocol.h"
 
 //----------- USER INCLUDE ----------------------
-
-// #define GET_ID(x) ((x >> 6) & 0x3)        // retrieve identifiant
-// #define GET_STATUS(x) (x & 1) // check the status (IDLE MODE or POWER MODE)
 
 //-------------LOOP FUNCTIONS DECLARATION----------------------
 void loop_communication_task(); // code to be executed in the slow communication task
@@ -52,75 +42,27 @@ void loop_control_task();       // code to be executed in real-time at 20kHz
 //--------------USER VARIABLES DECLARATIONS----------------------
 
 static uint32_t control_task_period = 100; //[us] period of the control task
-static bool pwm_enable = false;            //[bool] state of the PWM (ctrl task)
+static bool pwm_enable_leg_1 = false;            //[bool] state of the PWM (ctrl task)
+static bool pwm_enable_leg_2 = false;            //[bool] state of the PWM (ctrl task)
 
-uint8_t received_serial_char;
+// uint8_t received_serial_char;
 
-// struct consigne_struct
-// {
-//     uint8_t buf_vab[3];    // Contains Voltage DATA A and Voltage DATA B
-//     uint8_t test_RS485;    // variable for testing RS485
-//     uint8_t test_Sync;    // variable for testing Sync
-//     uint16_t analog_value_measure; // Contains analog measure
-//     uint8_t id_and_status; // Contains status
-// };
+float32_t V1_low_value;
+float32_t V2_low_value;
+float32_t I1_low_value;
+float32_t I2_low_value;
+float32_t I_high_value;
+float32_t V_high_value;
 
-// Future work : replace union
-// struct consigne_struct tx_consigne;
-// struct consigne_struct rx_consigne;
-// uint8_t* buffer_tx = (uint8_t*)&tx_consigne;
-// uint8_t* buffer_rx =(uint8_t*)&rx_consigne;
+float32_t delta_V1;
+float32_t V1_max = 0.0;
+float32_t V1_min = 0.0;
+float32_t delta_V2;
+float32_t V2_max = 0.0;
+float32_t V2_min = 0.0;
 
-// uint8_t status;
-// uint32_t counter_time = 0;
-
-// /* analog test parameters*/
-// uint16_t analog_value;
-// uint16_t analog_value_ref = 1000;
-
-/* RS485 test parameters*/
-static uint8_t rs485_send;
-static uint8_t rs485_receive;
-
-/* Sync test parameters*/
-static uint8_t sync_master_counter = 0;
-
-/* BOOL value for testing */
-static bool test_start = false; // start the test after a certain period of time
-static bool RS485_success = false;
-static bool Sync_success = false;
-static bool Analog_success = false;
-static bool Can_success = false;
 
 //---------------------------------------------------------------
-
-enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVERTER
-{
-    IDLEMODE = 0,
-    POWERMODE,
-};
-
-uint8_t mode = IDLEMODE;
-
-void reception_function(void)
-{
-    if ( GET_ID(rx_consigne.id_and_status) == 2)
-    {
-        analog_value = rx_consigne.analog_value_measure;
-        rs485_receive = rx_consigne.test_RS485;
-    }
-
-    if(test_start && (rs485_receive == rs485_send + 1)) RS485_success = true;
-
-    if(test_start && RS485_success && (analog_value - analog_value_ref > 50 || analog_value - analog_value_ref > -50)) Analog_success = true;
-
-    if(test_start && RS485_success && (sync_master_counter < 5 && rx_consigne.test_Sync == 10))
-    {
-        sync_master_counter++;
-        if(sync_master_counter == 5) Sync_success = true;
-
-    }
-}
 
 //---------------SETUP FUNCTIONS----------------------------------
 
@@ -150,106 +92,148 @@ void setup_software()
     task.startBackground(CommTask_num);
     task.startBackground(AppTask_num);
 
-    rs485Communication.configure(buffer_tx, buffer_rx, sizeof(consigne_struct), reception_function, 10625000, true); // custom configuration for RS485
+    rs485Communication.configure(buffer_tx, buffer_rx, sizeof(ConsigneStruct_t), master_reception_function, 10625000, true); // custom configuration for RS485
 }
 
 //---------------LOOP FUNCTIONS----------------------------------
 
 void loop_communication_task()
 {
-    while (1)
+    received_char = console_getchar();
+    switch (received_char)
     {
-        received_serial_char = console_getchar();
-        switch (received_serial_char)
-        {
-        case 'h':
-            //----------SERIAL INTERFACE MENU-----------------------
-            printk(" ________________________________________\n");
-            printk("|     ------- MENU ---------             |\n");
-            printk("|     press i : idle mode                |\n");
-            printk("|     press p : power mode               |\n");
-            printk("|________________________________________|\n\n");
-            //------------------------------------------------------
-            break;
-        case 't':
-            printk("%u:", RS485_success);
-            printk("%u:", Sync_success);
-            printk("%u:", Analog_success);
-            printk("%u\n:", Can_success);
-            break;
-        case 'i':
-            printk("idle mode\n");
-            mode = IDLEMODE;
-            break;
-        case 'p':
-            printk("power mode\n");
-            mode = POWERMODE;
-            break;
-        case 'l':
-            analog_value_ref += 100;
-            break;
-        case 'm':
-            analog_value_ref -= 100;
-            break;
-        default:
-            break;
-        }
+    case 'd':
+        console_read_line();
+        printk("buffer str = %s\n", bufferstr);
+        defaultHandler();
+        // spin.led.turnOn();
+        break;
+    case 's':
+        console_read_line();
+        printk("buffer str = %s\n", bufferstr);
+        powerLegSettingsHandler();
+        // counter = 0;
+        break;
+    case 'k':
+        console_read_line();
+        printk("buffer str = %s\n", bufferstr);
+        calibrationHandler();
+        break;
+    default:
+        break;
     }
 }
 
 void loop_application_task()
 {
-    while (1)
+    switch(mode)
     {
-
-        if (mode == IDLEMODE)
-        {
+        case IDLE:
             spin.led.turnOff();
-        }
-        else if (mode == POWERMODE)
-        {
+            if(!print_done) {
+                printk("IDLE \n");
+                print_done = true;
+
+                tx_consigne.id_and_status = (1 << 6) + 0;
+                rs485_send = 0;
+                tx_consigne.test_RS485 = rs485_send ;
+                rs485Communication.startTransmission();
+            }
+
+            break;
+        case POWER_OFF:
+            spin.led.toggle();
+            if(!print_done) {
+                printk("POWER OFF \n");
+                print_done = true;
+            }
+            printk("[%d,%d,%d,%d,%d]:", power_leg_settings[LEG1].settings[0], power_leg_settings[LEG1].settings[1], power_leg_settings[LEG1].settings[2], power_leg_settings[LEG1].settings[3], power_leg_settings[LEG1].settings[4]);
+            printk("%f:", power_leg_settings[LEG1].duty_cycle);
+            printk("%f:", power_leg_settings[LEG1].reference_value);
+            printk("%s:", power_leg_settings[LEG1].tracking_var_name);
+            printk("%f:", tracking_vars[LEG1].address[0]);
+            printk("[%d,%d,%d,%d,%d]:", power_leg_settings[LEG2].settings[0], power_leg_settings[LEG2].settings[1], power_leg_settings[LEG2].settings[2], power_leg_settings[LEG2].settings[3], power_leg_settings[LEG2].settings[4]);
+            printk("%f:", power_leg_settings[LEG2].duty_cycle);
+            printk("%f:", power_leg_settings[LEG2].reference_value);
+            printk("%s:", power_leg_settings[LEG2].tracking_var_name);
+            printk("%f:", tracking_vars[LEG2].address[0]);
+            printk("\n");
+            break;
+        case POWER_ON:
             spin.led.turnOn();
-        }
-        k_msleep(100);
+            if(!print_done) {
+                printk("POWER ON \n");
+                print_done = true;
+            }
+            printk("%u:", RS485_success);
+            printk("%u:", Sync_success);
+            printk("%u:", Analog_success);
+            printk("%u:", Can_success);
+            printk("%f:", power_leg_settings[LEG1].duty_cycle);
+            printk("%f:", power_leg_settings[LEG2].duty_cycle);
+            printk("\n");
+
+            break;
+        default:
+            break;
     }
+
+    // acquisition_moment = acquisition_moment + 0.01;
+    // if(acquisition_moment > 0.99) acquisition_moment = 0.02;
+    // spin.setHrtimAdcTrigInterleaved(acquisition_moment);
+    // printk("%f:", acquisition_moment);
+
+     task.suspendBackgroundMs(100);
 }
+
 
 void loop_control_task()
 {
-
     spin.dac.setConstValue(2, 1, analog_value_ref);
 
-    if (mode == IDLEMODE)
-    {
-        if (pwm_enable == true)
-        {
-            tx_consigne.id_and_status = (1 << 6) + 0;
-            rs485_send = 0;
-            tx_consigne.test_RS485 = rs485_send ;
+
+    switch(mode){
+        case IDLE:
+        case POWER_OFF:
+            twist.stopLeg(LEG1);
+            twist.stopLeg(LEG2);
+            pwm_enable_leg_1 = false;
+            pwm_enable_leg_2 = false;
+            break;
+
+        case POWER_ON:
+
+                /* Voltage reference */
+            rs485_send++;
+
+            /* writting rs485 value */
+            tx_consigne.test_RS485 = rs485_send;
+
+            tx_consigne.id_and_status = (1 << 6) + 1;
+
             rs485Communication.startTransmission();
-        }
-        pwm_enable = false;
+
+            counter_time++;
+            if (counter_time > 50) test_start =  true;
+
+            if(!pwm_enable_leg_1 && power_leg_settings[LEG1].settings[BOOL_LEG]) {twist.startLeg(LEG1); pwm_enable_leg_1 = true;}
+            if(!pwm_enable_leg_2 && power_leg_settings[LEG2].settings[BOOL_LEG]) {twist.startLeg(LEG2); pwm_enable_leg_2 = true;}
+
+
+            if(power_leg_settings[LEG1].settings[BOOL_LEG]){
+                    twist.setLegDutyCycle(LEG1, power_leg_settings[LEG1].duty_cycle ); //uses the normal convention by default
+            }
+
+            if(power_leg_settings[LEG2].settings[BOOL_LEG]){
+                    twist.setLegDutyCycle(LEG2, power_leg_settings[LEG2].duty_cycle); //uses the normal convention by default
+            }
+
+            break;
+        default:
+            break;
     }
-    else if (mode == POWERMODE)
-    {
-        pwm_enable = true;
-
-        /* Voltage reference */
-        rs485_send++;
-
-        /* writting rs485 value */
-        tx_consigne.test_RS485 = rs485_send;
-
-        tx_consigne.id_and_status = (1 << 6) + 1;
-
-        rs485Communication.startTransmission();
-
-        counter_time++;
-        if (counter_time > 50) test_start =  true;
-
-    }
-
 }
+
 
 /**
  * This is the main function of this example
