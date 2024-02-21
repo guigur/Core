@@ -231,7 +231,9 @@ void calibrationHandler() {
                 for (uint8_t i = 0; i < num_tracking_vars; i++) {
                     if (strcmp(variable, tracking_vars[i].name) == 0) {
                         data.setParameters(tracking_vars[i].channel_reference, gain, offset);
-                        printk("channel: %s\n", tracking_vars[i].name);
+                        int8_t err = data.saveParametersInNVS(tracking_vars[i].channel_reference);
+                        if (err) printk("Error writing parameters in permanent storage!\n");
+                        printk("channel name: %s\n", tracking_vars[i].name);
                         printk("channel: %d\n", tracking_vars[i].channel_reference);
                         break;
                     }
