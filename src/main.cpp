@@ -100,6 +100,7 @@ record_t record_array[RECORD_SIZE];
 static uint32_t counter = 0;
 static uint32_t print_counter = 0;
 
+static float32_t local_analog_value=0;
 
 //---------------SETUP FUNCTIONS----------------------------------
 
@@ -107,6 +108,7 @@ void setup_routine()
 {
     data.enableTwistDefaultChannels();
     spin.version.setBoardVersion(SPIN_v_0_9);
+    twist.setVersion(shield_TWIST_V1_3);
     twist.initLegBuck(LEG1);
     twist.initLegBuck(LEG2);
 
@@ -124,27 +126,27 @@ void setup_routine()
     spin.gpio.configurePin(LEG2_DRIVER_SWITCH, OUTPUT);
 
 
-    float32_t GV1 = 0.044301359147286994;
-    float32_t OV1 = -89.8291125470221;
-    float32_t GV2 = 0.043891466731813246;
-    float32_t OV2 = -89.01321095039089;
-    float32_t GVH = 0.029777494874229947;
-    float32_t OVH = 0.12805533844297656;
+    // float32_t GV1 = 0.044301359147286994;
+    // float32_t OV1 = -89.8291125470221;
+    // float32_t GV2 = 0.043891466731813246;
+    // float32_t OV2 = -89.01321095039089;
+    // float32_t GVH = 0.029777494874229947;
+    // float32_t OVH = 0.12805533844297656;
 
-    float32_t GI1 = 0.005510045850270965;
-    float32_t OI1 = -11.298753103344417;
-    float32_t GI2 = 0.005569903739753797;
-    float32_t OI2 = -11.47851441455354;
-    float32_t GIH = 0.0052774398156665;
-    float32_t OIH = -10.864400298536168;
+    // float32_t GI1 = 0.005510045850270965;
+    // float32_t OI1 = -11.298753103344417;
+    // float32_t GI2 = 0.005569903739753797;
+    // float32_t OI2 = -11.47851441455354;
+    // float32_t GIH = 0.0052774398156665;
+    // float32_t OIH = -10.864400298536168;
 
-    data.setParameters(V1_LOW, GV1, OV1);
-    data.setParameters(V2_LOW, GV2, OV2);
-    data.setParameters(V_HIGH, GVH, OVH);
+    // data.setParameters(V1_LOW, GV1, OV1);
+    // data.setParameters(V2_LOW, GV2, OV2);
+    // data.setParameters(V_HIGH, GVH, OVH);
 
-    data.setParameters(I1_LOW, GI1, OI1);
-    data.setParameters(I2_LOW, GI2, OI2);
-    data.setParameters(I_HIGH, GIH, OIH);
+    // data.setParameters(I1_LOW, GI1, OI1);
+    // data.setParameters(I2_LOW, GI2, OI2);
+    // data.setParameters(I_HIGH, GIH, OIH);
 
     spin.gpio.setPin(LEG1_CAPA_DGND);
     spin.gpio.setPin(LEG2_CAPA_DGND);
@@ -218,7 +220,7 @@ void loop_application_task()
             printk("%f:", power_leg_settings[LEG1].duty_cycle);
             printk("%f:", power_leg_settings[LEG1].reference_value);
             printk("%s:", power_leg_settings[LEG1].tracking_var_name);
-            printk("%f:", tracking_vars[LEG1].address[0]);
+            printk("%f:", power_leg_settings[LEG1].tracking_variable[0]);
             printk("[%d,%d,%d,%d,%d]:", power_leg_settings[LEG2].settings[0],
                                         power_leg_settings[LEG2].settings[1],
                                         power_leg_settings[LEG2].settings[2],
@@ -227,7 +229,7 @@ void loop_application_task()
             printk("%f:", power_leg_settings[LEG2].duty_cycle);
             printk("%f:", power_leg_settings[LEG2].reference_value);
             printk("%s:", power_leg_settings[LEG2].tracking_var_name);
-            printk("%f:", tracking_vars[LEG2].address[0]);
+            printk("%f:", power_leg_settings[LEG2].tracking_variable[0]);
             printk("\n");
             break;
         case POWER_ON:
@@ -238,15 +240,17 @@ void loop_application_task()
             }
             printk("%f:", power_leg_settings[LEG1].duty_cycle);
             printk("%f:", V1_low_value);
-            printk("%f:", V1_low_value);
             printk("%f:", I1_low_value);
             printk("%f:", V1_max);
             printk("%f:", power_leg_settings[LEG2].duty_cycle);
             printk("%f:", I2_low_value);
-            printk("%f",  V2_low_value);
+            printk("%f:", V2_low_value);
             printk("%f:", V2_max);
             printk("%f:", V_high_value);
             printk("%f:", I_high_value);
+            printk("%f:", local_analog_value);
+            printk("%d:", can_test_ctrl_enable);
+            printk("%d:", can_test_reference_value);
             printk("\n");
 
             break;
@@ -274,15 +278,15 @@ void loop_control_task()
 
     meas_data = data.getLatest(V_HIGH);
     if (meas_data != NO_VALUE)
-        I1_low_value = meas_data;
+        V_high_value = meas_data;
 
     meas_data = data.getLatest(I1_LOW);
     if (meas_data != NO_VALUE)
-        I2_low_value = meas_data;
+        I1_low_value = meas_data;
 
     meas_data = data.getLatest(I2_LOW);
     if (meas_data != NO_VALUE)
-        V_high_value = meas_data;
+        I2_low_value = meas_data;
 
     meas_data = data.getLatest(I_HIGH);
     if (meas_data != NO_VALUE)
@@ -290,8 +294,8 @@ void loop_control_task()
 
 
     /* Analog communication value */
+    local_analog_value = data.getLatest(2, 35);
     data.triggerAcquisition(2);
-    analog_value = data.getLatest(2, 35);
 
     ctrl_slave_counter++; //counter for the slave function
 
@@ -315,6 +319,10 @@ void loop_control_task()
 
             if(!pwm_enable_leg_1 && power_leg_settings[LEG1].settings[BOOL_LEG]) {twist.startLeg(LEG1); pwm_enable_leg_1 = true;}
             if(!pwm_enable_leg_2 && power_leg_settings[LEG2].settings[BOOL_LEG]) {twist.startLeg(LEG2); pwm_enable_leg_2 = true;}
+
+            if(pwm_enable_leg_1 && !power_leg_settings[LEG1].settings[BOOL_LEG]) {twist.stopLeg(LEG1); pwm_enable_leg_1 = false;}
+            if(pwm_enable_leg_2 && !power_leg_settings[LEG2].settings[BOOL_LEG]) {twist.stopLeg(LEG2); pwm_enable_leg_2 = false;}
+
 
             //calls the pid calculation if the converter in either in mode buck or boost
             if(power_leg_settings[LEG1].settings[BOOL_BUCK] || power_leg_settings[LEG1].settings[BOOL_BOOST])
