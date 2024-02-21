@@ -231,8 +231,10 @@ void calibrationHandler() {
                 for (uint8_t i = 0; i < num_tracking_vars; i++) {
                     if (strcmp(variable, tracking_vars[i].name) == 0) {
                         data.setParameters(tracking_vars[i].channel_reference, gain, offset);
-                        int8_t err = data.saveParametersInNVS(tracking_vars[i].channel_reference);
-                        if (err) printk("Error writing parameters in permanent storage!\n");
+                        int8_t err_write = data.saveParametersInNVS(tracking_vars[i].channel_reference);
+                        if (err_write) printk("Error writing parameters in permanent storage!\n");
+                        int8_t err_check = data.getParametersFromNVS(tracking_vars[i].channel_reference);
+                        printk("Check for NVS writing (0 if correct) :%d!\n",err_check);
                         printk("channel name: %s\n", tracking_vars[i].name);
                         printk("channel: %d\n", tracking_vars[i].channel_reference);
                         break;
@@ -249,11 +251,11 @@ void boolSettingsHandler(uint8_t power_leg, uint8_t setting_position)
     if (strncmp(bufferstr + 7, "_on", 3) == 0) {
         power_leg_settings[power_leg].settings[setting_position] = BOOL_SETTING_ON;
         if (setting_position == BOOL_CAPA)  spin.gpio.resetPin(power_leg_settings[power_leg].switches[CAPA_SWITCH_INDEX]);  //turns the capacitor switch ON
-        if (setting_position == BOOL_DRIVER)  spin.gpio.resetPin(power_leg_settings[power_leg].switches[DRIVER_SWITCH_INDEX]);  //turns the capacitor switch ON
+        if (setting_position == BOOL_DRIVER)  spin.gpio.setPin(power_leg_settings[power_leg].switches[DRIVER_SWITCH_INDEX]);  //turns the capacitor switch ON
     } else if (strncmp(bufferstr + 7, "_off", 4) == 0) {
         power_leg_settings[power_leg].settings[setting_position] = BOOL_SETTING_OFF;
         if (setting_position == BOOL_CAPA)  spin.gpio.setPin(power_leg_settings[power_leg].switches[CAPA_SWITCH_INDEX]);  //turns the capacitor switch ON
-        if (setting_position == BOOL_DRIVER)  spin.gpio.setPin(power_leg_settings[power_leg].switches[DRIVER_SWITCH_INDEX]);  //turns the capacitor switch ON
+        if (setting_position == BOOL_DRIVER)  spin.gpio.resetPin(power_leg_settings[power_leg].switches[DRIVER_SWITCH_INDEX]);  //turns the capacitor switch ON
     }
     else {
         // Unknown command
