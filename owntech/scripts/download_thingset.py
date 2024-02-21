@@ -55,4 +55,4 @@ if do_download:
 
 	thingset_dir = os.path.join(third_party_dir, "thingset")
 	if not os.path.isdir(thingset_dir):
-		cloneRepo(thingset_dir, "https://github.com/ThingSet/thingset-device-library", "main")
+		cloneRepo(thingset_dir, "https://github.com/ThingSet/thingset-device-library", "0c9953b")
