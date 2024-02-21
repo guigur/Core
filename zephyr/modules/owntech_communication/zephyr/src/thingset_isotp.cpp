@@ -107,5 +107,5 @@ void can_isotp_thread()
     }
 }
 
-K_THREAD_DEFINE(can_isotp, RX_THREAD_STACK_SIZE, can_isotp_thread, NULL, NULL, NULL,
-    RX_THREAD_PRIORITY, 0, 1500);
+// K_THREAD_DEFINE(can_isotp, RX_THREAD_STACK_SIZE, can_isotp_thread, NULL, NULL, NULL,
+//     RX_THREAD_PRIORITY, 0, 1500);

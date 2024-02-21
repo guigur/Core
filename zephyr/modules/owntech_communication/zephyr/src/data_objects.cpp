@@ -41,11 +41,11 @@ float32_t i_high_value = 0; //store value of ihigh (app task)
 
 float32_t temp_value = 0; //store value of temperature (app task)
 
-float32_t can_reference_value = 0; //store value of reference (master-slave mode)
+uint16_t can_reference_value = 0; //store value of reference (master-slave mode)
 
 bool ctrl_enable = false; //store value of the enable (master-slave mode)
 
-uint16_t can_node_addr = 0x60;
+uint16_t can_node_addr = 0x50;
 
 
 
@@ -190,7 +190,7 @@ static ThingSetDataObject data_objects[] = {
                 "en": "Current control target"
             }
         }*/
-        TS_ITEM_FLOAT(0x8001, "zCtrl_Reference", &can_reference_value, 1,
+        TS_ITEM_UINT16(0x8001, "zCtrl_Reference", &can_reference_value,
             ID_CTRL, TS_ANY_RW, SUBSET_CTRL),
 
         /*{
