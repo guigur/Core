@@ -236,12 +236,15 @@ void loop_application_task()
                 printk("POWER ON \n");
                 print_done = true;
             }
-            printk("%f:", V1_max);
-            printk("%f:", V2_max);
+            printk("%f:", power_leg_settings[LEG1].duty_cycle);
+            printk("%f:", V1_low_value);
             printk("%f:", V1_low_value);
             printk("%f:", I1_low_value);
+            printk("%f:", V1_max);
+            printk("%f:", power_leg_settings[LEG2].duty_cycle);
             printk("%f:", I2_low_value);
             printk("%f",  V2_low_value);
+            printk("%f:", V2_max);
             printk("%f:", V_high_value);
             printk("%f:", I_high_value);
             printk("\n");
