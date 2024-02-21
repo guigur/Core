@@ -40,13 +40,13 @@ class CanCommunication
 public:
 	static uint16_t  getCanNodeAddr();
 	static bool      getCtrlEnable();
-	static float32_t getCtrlReference();
+	static uint16_t getCtrlReference();
 	static uint16_t  getBroadcastPeriod();
 	static uint16_t  getControlPeriod();
 
 	static void setCanNodeAddr(uint16_t addr);
 	static void setCtrlEnable(bool enable);
-	static void setCtrlReference(float32_t reference);
+	static void setCtrlReference(uint16_t reference);
 	static void setBroadcastPeriod(uint16_t time_100_ms);
 	static void setControlPeriod(uint16_t time_100_ms);
 

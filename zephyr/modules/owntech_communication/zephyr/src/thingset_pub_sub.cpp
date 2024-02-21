@@ -31,7 +31,8 @@ extern ThingSet ts;
 extern uint16_t can_node_addr;
 uint16_t broadcast_time = 10; //the time of the measurement variables broadcast (multiples of 100ms)
 uint16_t control_time = 10;  //the time of the control variables broadcast/receive (multiples of 100ms)
-static const struct device *can_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_can_primary));
+// static const struct device *can_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_can_primary));
+static const struct device *can_dev = DEVICE_DT_GET(DT_NODELABEL(can2));
 
 // below defines should go into the ThingSet library
 #define TS_CAN_SOURCE_GET(id)           (((uint32_t)id & TS_CAN_SOURCE_MASK) >> TS_CAN_SOURCE_POS)
@@ -40,7 +41,7 @@ static const struct device *can_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_can_primary
 CAN_MSGQ_DEFINE(sub_msgq, 10);
 
 const struct can_filter ctrl_filter = {
-    .id = TS_CAN_BASE_PUBSUB,
+    .id = TS_CAN_TYPE_PUBSUB,
     // .rtr = CAN_DATAFRAME,
     //.id_type = CAN_EXTENDED_IDENTIFIER,
     .mask = TS_CAN_TYPE_MASK | CAN_EXT_ID_MASK,
