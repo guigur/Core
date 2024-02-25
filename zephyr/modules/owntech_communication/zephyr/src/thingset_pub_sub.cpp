@@ -41,7 +41,7 @@ static const struct device *can_dev = DEVICE_DT_GET(DT_NODELABEL(can2));
 CAN_MSGQ_DEFINE(sub_msgq, 10);
 
 const struct can_filter ctrl_filter = {
-    .id = TS_CAN_TYPE_PUBSUB,
+    .id = TS_CAN_BASE_PUBSUB,
     // .rtr = CAN_DATAFRAME,
     //.id_type = CAN_EXTENDED_IDENTIFIER,
     .mask = TS_CAN_TYPE_MASK | CAN_EXT_ID_MASK,
