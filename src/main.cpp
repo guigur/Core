@@ -28,6 +28,12 @@
  */
 
 //-------------OWNTECH DRIVERS-------------------
+
+#include "SpinAPI.h"
+#include "TaskAPI.h"
+#include "TwistAPI.h"
+#include "DataAPI.h"
+
 #include "test_bench_comm_protocol.h"
 
 #include "opalib_control_pid.h"
