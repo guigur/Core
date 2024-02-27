@@ -118,7 +118,7 @@ void setup_routine()
     twist.initLegBuck(LEG1);
     twist.initLegBuck(LEG2);
 
-    // syncCommunication.initSlave(); // start the synchronisation
+    syncCommunication.initSlave(); // start the synchronisation
     data.enableAcquisition(2, 35); // enable the analog measurement
     data.triggerAcquisition(2);     // starts the analog measurement
     canCommunication.setCanNodeAddr(CAN_SLAVE_ADDR);
@@ -132,27 +132,27 @@ void setup_routine()
     spin.gpio.configurePin(LEG2_DRIVER_SWITCH, OUTPUT);
 
 
-    float32_t GV1 = 0.044301359147286994;
-    float32_t OV1 = -89.8291125470221;
-    float32_t GV2 = 0.043891466731813246;
-    float32_t OV2 = -89.01321095039089;
-    float32_t GVH = 0.029777494874229947;
-    float32_t OVH = 0.12805533844297656;
+    // float32_t GV1 = 0.044301359147286994;
+    // float32_t OV1 = -89.8291125470221;
+    // float32_t GV2 = 0.043891466731813246;
+    // float32_t OV2 = -89.01321095039089;
+    // float32_t GVH = 0.029777494874229947;
+    // float32_t OVH = 0.12805533844297656;
 
-    float32_t GI1 = 0.005510045850270965;
-    float32_t OI1 = -11.298753103344417;
-    float32_t GI2 = 0.005569903739753797;
-    float32_t OI2 = -11.47851441455354;
-    float32_t GIH = 0.0052774398156665;
-    float32_t OIH = -10.864400298536168;
+    // float32_t GI1 = 0.005510045850270965;
+    // float32_t OI1 = -11.298753103344417;
+    // float32_t GI2 = 0.005569903739753797;
+    // float32_t OI2 = -11.47851441455354;
+    // float32_t GIH = 0.0052774398156665;
+    // float32_t OIH = -10.864400298536168;
 
-    data.setParameters(V1_LOW, GV1, OV1);
-    data.setParameters(V2_LOW, GV2, OV2);
-    data.setParameters(V_HIGH, GVH, OVH);
+    // data.setParameters(V1_LOW, GV1, OV1);
+    // data.setParameters(V2_LOW, GV2, OV2);
+    // data.setParameters(V_HIGH, GVH, OVH);
 
-    data.setParameters(I1_LOW, GI1, OI1);
-    data.setParameters(I2_LOW, GI2, OI2);
-    data.setParameters(I_HIGH, GIH, OIH);
+    // data.setParameters(I1_LOW, GI1, OI1);
+    // data.setParameters(I2_LOW, GI2, OI2);
+    // data.setParameters(I_HIGH, GIH, OIH);
 
     spin.gpio.setPin(LEG1_CAPA_DGND);
     spin.gpio.setPin(LEG2_CAPA_DGND);
