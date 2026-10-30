@@ -1,0 +1,16 @@
+description: OwnTech nested TCA9548A I2C switch
+
+compatible: "owntech,tca9548a-nested"
+
+include: [i2c-device.yaml]
+
+properties:
+  reset-gpios:
+    type: phandle-array
+    description: Optional active-low reset GPIO.
+
+child-binding:
+  description: Nested TCA9548A channel
+  compatible: "owntech,tca9548a-nested-channel"
+  include: [i2c-controller.yaml]
+  on-bus: i2c

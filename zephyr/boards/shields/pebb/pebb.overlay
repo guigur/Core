@@ -6,6 +6,39 @@
  */
 
 #include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	hb1: hb-board-1 {
+		compatible = "owntech,hb-board";
+		high-side-sensor = <&hb1_temp_hs>;
+		low-side-sensor = <&hb1_temp_ls>;
+		high-side-eeprom = <&hb1_eeprom_hs>;
+		low-side-eeprom = <&hb1_eeprom_ls>;
+		alert-gpios = <&pebb_hb_alerts 1 GPIO_ACTIVE_LOW>,
+			      <&pebb_hb_alerts 0 GPIO_ACTIVE_LOW>;
+	};
+
+	hb2: hb-board-2 {
+		compatible = "owntech,hb-board";
+		high-side-sensor = <&hb2_temp_hs>;
+		low-side-sensor = <&hb2_temp_ls>;
+		high-side-eeprom = <&hb2_eeprom_hs>;
+		low-side-eeprom = <&hb2_eeprom_ls>;
+		alert-gpios = <&pebb_hb_alerts 3 GPIO_ACTIVE_LOW>,
+			      <&pebb_hb_alerts 2 GPIO_ACTIVE_LOW>;
+	};
+
+	hb3: hb-board-3 {
+		compatible = "owntech,hb-board";
+		high-side-sensor = <&hb3_temp_hs>;
+		low-side-sensor = <&hb3_temp_ls>;
+		high-side-eeprom = <&hb3_eeprom_hs>;
+		low-side-eeprom = <&hb3_eeprom_ls>;
+		alert-gpios = <&pebb_hb_alerts 5 GPIO_ACTIVE_LOW>,
+			      <&pebb_hb_alerts 4 GPIO_ACTIVE_LOW>;
+	};
+};
 
 /* PB7 is reserved for I2C1 SDA on PEBB, not TIM4_CH2. */
 &timers4 {
@@ -99,6 +132,117 @@
 				compatible = "owntech,afe-v3";
 				reg = <0x21>;
 				dac-address = <0x61>;
+			};
+		};
+
+		/* U805 channel 4 crosses U804 into the PGND I2C domain. */
+		pebb_power_i2c_bus: i2c@4 {
+			compatible = "ti,tca9548a-channel";
+			reg = <4>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/* U814: A2=A1=0, A0=1, address 0x71. */
+			pebb_power_i2c_mux: tca9548a@71 {
+				compatible = "owntech,tca9548a-nested";
+				reg = <0x71>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				/* U814 channel 1: PEBB I/O expanders. */
+				pebb_power_io_bus: i2c@1 {
+					compatible = "owntech,tca9548a-nested-channel";
+					reg = <1>;
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					/* U838: A2=A1=0, A0=1. Pins 0..5 are HB alerts. */
+					pebb_hb_alerts: gpio@21 {
+						compatible = "nxp,pca9555";
+						reg = <0x21>;
+						gpio-controller;
+						#gpio-cells = <2>;
+						ngpios = <16>;
+					};
+				};
+
+				/* U814 channel 2: HB1, HS=0x48 and LS=0x49. */
+				hb1_i2c_bus: i2c@2 {
+					compatible = "owntech,tca9548a-nested-channel";
+					reg = <2>;
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					hb1_temp_hs: temperature-sensor@48 {
+						compatible = "ti,tmp116";
+						reg = <0x48>;
+
+						hb1_eeprom_hs: eeprom {
+							compatible = "ti,tmp116-eeprom";
+						};
+					};
+
+					hb1_temp_ls: temperature-sensor@49 {
+						compatible = "ti,tmp116";
+						reg = <0x49>;
+
+						hb1_eeprom_ls: eeprom {
+							compatible = "ti,tmp116-eeprom";
+						};
+					};
+				};
+
+				/* U814 channel 3: HB2, HS=0x48 and LS=0x49. */
+				hb2_i2c_bus: i2c@3 {
+					compatible = "owntech,tca9548a-nested-channel";
+					reg = <3>;
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					hb2_temp_hs: temperature-sensor@48 {
+						compatible = "ti,tmp116";
+						reg = <0x48>;
+
+						hb2_eeprom_hs: eeprom {
+							compatible = "ti,tmp116-eeprom";
+						};
+					};
+
+					hb2_temp_ls: temperature-sensor@49 {
+						compatible = "ti,tmp116";
+						reg = <0x49>;
+
+						hb2_eeprom_ls: eeprom {
+							compatible = "ti,tmp116-eeprom";
+						};
+					};
+				};
+
+				/* U814 channel 4: HB3, HS=0x48 and LS=0x49. */
+				hb3_i2c_bus: i2c@4 {
+					compatible = "owntech,tca9548a-nested-channel";
+					reg = <4>;
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					hb3_temp_hs: temperature-sensor@48 {
+						compatible = "ti,tmp116";
+						reg = <0x48>;
+
+						hb3_eeprom_hs: eeprom {
+							compatible = "ti,tmp116-eeprom";
+						};
+					};
+
+					hb3_temp_ls: temperature-sensor@49 {
+						compatible = "ti,tmp116";
+						reg = <0x49>;
+
+						hb3_eeprom_ls: eeprom {
+							compatible = "ti,tmp116-eeprom";
+						};
+					};
+				};
 			};
 		};
 	};

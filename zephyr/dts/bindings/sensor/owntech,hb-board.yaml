@@ -1,0 +1,29 @@
+description: OwnTech half-bridge board monitoring devices
+
+compatible: "owntech,hb-board"
+
+properties:
+  high-side-sensor:
+    type: phandle
+    required: true
+    description: TMP117 monitoring the high-side switch.
+
+  low-side-sensor:
+    type: phandle
+    required: true
+    description: TMP117 monitoring the low-side switch.
+
+  high-side-eeprom:
+    type: phandle
+    required: true
+    description: EEPROM child of the high-side TMP117.
+
+  low-side-eeprom:
+    type: phandle
+    required: true
+    description: EEPROM child of the low-side TMP117.
+
+  alert-gpios:
+    type: phandle-array
+    required: true
+    description: High-side then low-side active-low TMP117 ALERT inputs.
