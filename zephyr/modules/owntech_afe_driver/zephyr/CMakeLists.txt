@@ -1,0 +1,6 @@
+if(CONFIG_OWNTECH_AFE_DRIVER)
+  zephyr_include_directories(public_api)
+  zephyr_library()
+  zephyr_library_sources(src/afe.c)
+  zephyr_library_sources_ifdef(CONFIG_OWNTECH_PEBB_AFE_CONTROL src/pebb_afe.c)
+endif()

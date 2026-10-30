@@ -28,7 +28,11 @@
 #include "TimerHAL.h"
 
 
+#if DT_NODE_HAS_STATUS(TIMER4_DEVICE, okay)
 static const struct device* timer4 = DEVICE_DT_GET(TIMER4_DEVICE);
+#else
+static const struct device* timer4 = nullptr;
+#endif
 static const struct device* timer3 = DEVICE_DT_GET(TIMER3_DEVICE);
 
 bool TimerHAL::timer4init    = false;
@@ -40,7 +44,7 @@ bool TimerHAL::timer3started = false;
 void TimerHAL::Initialize(timernumber_t timer_number)
 {
 	if (timer_number == TIMER4){
-		if (device_is_ready(timer4) == true)
+		if ((timer4 != nullptr) && (device_is_ready(timer4) == true))
 		{
 			/* Configure timer */
 			struct timer_config_t timer_cfg =
@@ -81,7 +85,7 @@ void TimerHAL::startLogIncrementalEncoder(timernumber_t timer_number)
 
 		if (timer4started == false)
 		{
-			if (device_is_ready(timer4) == true)
+			if ((timer4 != nullptr) && (device_is_ready(timer4) == true))
 			{
 				timer_start(timer4);
 				timer4started = true;

@@ -1,0 +1,44 @@
+description: OwnTech AFE v3 analog front end
+
+compatible: "owntech,afe-v3"
+
+include: i2c-device.yaml
+
+properties:
+  reg:
+    required: true
+    description: TCA9555 7-bit address, normally 0x20 plus A2:A0.
+
+  dac-address:
+    type: int
+    required: true
+    description: MCP4728 7-bit address stored in the DAC EEPROM, normally 0x60.
+
+  int-gpios:
+    type: phandle-array
+    description: Optional active-low TCA9555 INT connection.
+
+  address-gpios:
+    type: phandle-array
+    description: |
+      Optional GPIOs connected to TCA9555 A0, A1 and A2, in that order.
+      All three entries must be provided. The driver drives the address encoded
+      by reg before its first I2C transaction. Omit this property when the
+      address pins are strapped on the board. When the TCA9555 is powered at
+      5 V from a 3.3 V MCU, use suitable 5 V tolerant open-drain pins with
+      external pull-ups or level translation.
+
+  startup-gain:
+    type: int
+    default: 4
+    description: Startup gain index. Index 4 is nominal gain x1.
+
+  startup-bandwidth:
+    type: int
+    default: 7
+    description: Startup bandwidth index.
+
+  startup-dac-millivolts:
+    type: array
+    default: [2500, 2500, 2500, 3976]
+    description: Startup values for SELF+, SELF-, input offset and output offset.

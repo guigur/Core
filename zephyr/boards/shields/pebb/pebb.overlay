@@ -1,0 +1,105 @@
+/*
+ * PEBB I2C tree derived from KiCAD_files/i2c_tree.kicad_sch.
+ *
+ * U726 is pulled low by R455 at startup. NC7SB3157 S=0 connects its B0
+ * input (PA15) to SCL_MCU. SDA_MCU is directly connected to PB7.
+ */
+
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/* PB7 is reserved for I2C1 SDA on PEBB, not TIM4_CH2. */
+&timers4 {
+	status = "disabled";
+};
+
+&i2c1 {
+	pinctrl-0 = <&i2c1_scl_pa15 &i2c1_sda_pb7>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+	status = "okay";
+
+	/* U805: A2=A1=A0=0, address 0x70. */
+	pebb_i2c_mux: tca9548a@70 {
+		compatible = "ti,tca9548a";
+		reg = <0x70>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		/* U805 channel 0: AFE1..AFE8. */
+		pebb_afe_bus_0: i2c@0 {
+			compatible = "ti,tca9548a-channel";
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			afe_v_high: afe@20 {
+				compatible = "owntech,afe-v3";
+				reg = <0x20>;
+				dac-address = <0x60>;
+			};
+
+			afe_v1_low: afe@21 {
+				compatible = "owntech,afe-v3";
+				reg = <0x21>;
+				dac-address = <0x61>;
+			};
+
+			afe_v2_low: afe@22 {
+				compatible = "owntech,afe-v3";
+				reg = <0x22>;
+				dac-address = <0x62>;
+			};
+
+			afe_v3_low: afe@23 {
+				compatible = "owntech,afe-v3";
+				reg = <0x23>;
+				dac-address = <0x63>;
+			};
+
+			afe_i_high: afe@24 {
+				compatible = "owntech,afe-v3";
+				reg = <0x24>;
+				dac-address = <0x64>;
+			};
+
+			afe_i1_low: afe@25 {
+				compatible = "owntech,afe-v3";
+				reg = <0x25>;
+				dac-address = <0x65>;
+			};
+
+			afe_i2_low: afe@26 {
+				compatible = "owntech,afe-v3";
+				reg = <0x26>;
+				dac-address = <0x66>;
+			};
+
+			afe_i3_low: afe@27 {
+				compatible = "owntech,afe-v3";
+				reg = <0x27>;
+				dac-address = <0x67>;
+			};
+		};
+
+		/* U805 channel 1: AFE9, AFE10 and the unrelated U839 at 0x27. */
+		pebb_afe_bus_1: i2c@1 {
+			compatible = "ti,tca9548a-channel";
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			afe_sin: afe@20 {
+				compatible = "owntech,afe-v3";
+				reg = <0x20>;
+				dac-address = <0x60>;
+			};
+
+			afe_cos: afe@21 {
+				compatible = "owntech,afe-v3";
+				reg = <0x21>;
+				dac-address = <0x61>;
+			};
+		};
+	};
+};

@@ -1,0 +1,34 @@
+config OWNTECH_AFE_DRIVER
+	bool "OwnTech AFE v3 driver"
+	default n
+	select I2C
+	select GPIO
+	help
+	  Enable support for the OwnTech AFE v3 board. Each AFE is described
+	  as an I2C child in devicetree and can therefore be connected directly
+	  to an I2C controller or through a TCA9548A channel.
+
+if OWNTECH_AFE_DRIVER
+
+config OWNTECH_AFE_DRIVER_INIT_PRIORITY
+	int "AFE driver initialization priority"
+	default 90
+	help
+	  Must be greater than the I2C controller and TCA9548A channel driver
+	  initialization priorities.
+
+module = OWNTECH_AFE_DRIVER
+module-dep = LOG
+module-str = OwnTech AFE driver
+module-help = Sets the log level for the OwnTech AFE driver.
+source "subsys/logging/Kconfig.template.log_config"
+
+endif
+
+config OWNTECH_PEBB_AFE_CONTROL
+	bool "PEBB ten-AFE group control"
+	default y if SHIELD_PEBB
+	depends on SHIELD_PEBB && OWNTECH_AFE_DRIVER
+	help
+	  Expose the ten PEBB AFE devices by their functional names and provide
+	  best-effort group operations. Requires the PEBB shield devicetree.
