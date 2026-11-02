@@ -179,7 +179,7 @@ int hb_eeprom_write_word(const struct device *dev, enum hb_side side,
 	if (!hb_side_is_valid(side) || word >= HB_TMP117_EEPROM_WORD_COUNT) {
 		return -EINVAL;
 	}
-	if (word == HB_TMP117_EEPROM_OFFSET_WORD) {
+	if (word == 0U || word == HB_TMP117_EEPROM_OFFSET_WORD) {
 		return -EACCES;
 	}
 
@@ -194,6 +194,113 @@ int hb_eeprom_write_word(const struct device *dev, enum hb_side side,
 	k_mutex_unlock(&data->lock);
 
 	return ret == 0 && readback != value ? -EIO : ret;
+}
+
+static int hb_module_data_read_locked(const struct device *dev,
+				      uint8_t bytes[HB_MODULE_DATA_SIZE])
+{
+	uint16_t word;
+	int ret;
+
+	for (size_t side = 0; side < 2U; ++side) {
+		for (size_t slot = 0; slot < 2U; ++slot) {
+			uint8_t word_index = slot == 0U ? 1U : 3U;
+			size_t offset = side * 4U + slot * 2U;
+
+			ret = eeprom_read(hb_eeprom_device(dev, (enum hb_side)side),
+					  (off_t)word_index * sizeof(word), &word,
+					  sizeof(word));
+			if (ret != 0) {
+				return ret;
+			}
+			bytes[offset] = (uint8_t)word;
+			bytes[offset + 1U] = (uint8_t)(word >> 8);
+		}
+	}
+	return 0;
+}
+
+int hb_module_data_read(const struct device *dev,
+			struct hb_module_data *module_data)
+{
+	struct hb_data *data = dev->data;
+	uint8_t bytes[HB_MODULE_DATA_SIZE];
+	int ret;
+
+	if (module_data == NULL) {
+		return -EINVAL;
+	}
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = hb_module_data_read_locked(dev, bytes);
+	k_mutex_unlock(&data->lock);
+	if (ret != 0) {
+		return ret;
+	}
+
+	module_data->operating_hours = (uint32_t)bytes[0] |
+				       ((uint32_t)bytes[1] << 8) |
+				       ((uint32_t)bytes[2] << 16);
+	module_data->max_voltage_code = (uint16_t)bytes[3] |
+					((uint16_t)(bytes[4] & 0x0FU) << 8);
+	module_data->max_current_code = (uint16_t)(bytes[4] >> 4) |
+					((uint16_t)bytes[5] << 4);
+	module_data->flags = bytes[6];
+	module_data->reserved = bytes[7];
+	return 0;
+}
+
+int hb_module_data_write(const struct device *dev,
+			 const struct hb_module_data *module_data)
+{
+	struct hb_data *data = dev->data;
+	uint8_t bytes[HB_MODULE_DATA_SIZE];
+	uint16_t word;
+	int ret = 0;
+
+	if (module_data == NULL ||
+	    module_data->operating_hours > HB_MODULE_RUNTIME_HOURS_MAX ||
+	    module_data->max_voltage_code > HB_MODULE_MEASUREMENT_MAX ||
+	    module_data->max_current_code > HB_MODULE_MEASUREMENT_MAX) {
+		return -EINVAL;
+	}
+
+	bytes[0] = (uint8_t)module_data->operating_hours;
+	bytes[1] = (uint8_t)(module_data->operating_hours >> 8);
+	bytes[2] = (uint8_t)(module_data->operating_hours >> 16);
+	bytes[3] = (uint8_t)module_data->max_voltage_code;
+	bytes[4] = (uint8_t)((module_data->max_voltage_code >> 8) |
+			     ((module_data->max_current_code & 0x0FU) << 4));
+	bytes[5] = (uint8_t)(module_data->max_current_code >> 4);
+	bytes[6] = module_data->flags;
+	bytes[7] = module_data->reserved;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	for (size_t side = 0; side < 2U && ret == 0; ++side) {
+		for (size_t slot = 0; slot < 2U && ret == 0; ++slot) {
+			uint8_t word_index = slot == 0U ? 1U : 3U;
+			size_t offset = side * 4U + slot * 2U;
+
+			word = (uint16_t)bytes[offset] |
+			       ((uint16_t)bytes[offset + 1U] << 8);
+			ret = eeprom_write(hb_eeprom_device(dev, (enum hb_side)side),
+				    (off_t)word_index * sizeof(word), &word,
+				    sizeof(word));
+			if (ret == 0) {
+				uint16_t readback;
+
+				ret = eeprom_read(
+					hb_eeprom_device(dev, (enum hb_side)side),
+					(off_t)word_index * sizeof(word), &readback,
+					sizeof(readback));
+				if (ret == 0 && readback != word) {
+					ret = -EIO;
+				}
+			}
+		}
+	}
+	k_mutex_unlock(&data->lock);
+	return ret;
 }
 
 #define HB_DEFINE(inst)                                                       \
