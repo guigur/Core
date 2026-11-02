@@ -1,0 +1,5 @@
+if(CONFIG_OWNTECH_FEEDER_DRIVER)
+  zephyr_library()
+  zephyr_library_sources(src/feeder.c)
+  zephyr_include_directories(public_api)
+endif()

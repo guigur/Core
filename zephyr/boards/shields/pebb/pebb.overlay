@@ -9,6 +9,12 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
 
 / {
+	low_voltage_feeder: low-voltage-feeder {
+		compatible = "owntech,low-voltage-feeder";
+		eeprom = <&feeder_eeprom>;
+		persist-interval-minutes = <60>;
+	};
+
 	hb1: hb-board-1 {
 		compatible = "owntech,hb-board";
 		high-side-sensor = <&hb1_temp_hs>;
@@ -148,6 +154,24 @@
 				reg = <0x71>;
 				#address-cells = <1>;
 				#size-cells = <0>;
+
+				/* U814 channel 0: external low-voltage feeder. */
+				feeder_i2c_bus: i2c@0 {
+					compatible = "owntech,tca9548a-nested-channel";
+					reg = <0>;
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					/* Feeder U101: XBLW 24C02S, A2..A0=0. */
+					feeder_eeprom: eeprom@50 {
+						compatible = "xblw,24c02s", "atmel,at24";
+						reg = <0x50>;
+						size = <256>;
+						pagesize = <16>;
+						address-width = <8>;
+						timeout = <5>;
+					};
+				};
 
 				/* U814 channel 1: PEBB I/O expanders. */
 				pebb_power_io_bus: i2c@1 {

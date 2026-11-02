@@ -1,0 +1,14 @@
+description: OwnTech low-voltage feeder with persistent operating data
+
+compatible: "owntech,low-voltage-feeder"
+
+properties:
+  eeprom:
+    type: phandle
+    required: true
+    description: Native Zephyr EEPROM device fitted to the feeder.
+
+  persist-interval-minutes:
+    type: int
+    default: 60
+    description: Minimum accumulated operating time between EEPROM checkpoints.

@@ -1,0 +1,19 @@
+config OWNTECH_FEEDER_DRIVER
+	bool "OwnTech low-voltage feeder driver"
+	default y if DT_HAS_OWNTECH_LOW_VOLTAGE_FEEDER_ENABLED
+	depends on DT_HAS_OWNTECH_LOW_VOLTAGE_FEEDER_ENABLED
+	depends on EEPROM
+	select CRC
+	help
+	  Expose the low-voltage feeder EEPROM and maintain its operating-time
+	  counter in a CRC-protected, wear-levelled EEPROM journal.
+
+if OWNTECH_FEEDER_DRIVER
+
+config OWNTECH_FEEDER_DRIVER_INIT_PRIORITY
+	int "Low-voltage feeder initialization priority"
+	default 92
+	help
+	  Must be greater than the EEPROM initialization priority.
+
+endif
