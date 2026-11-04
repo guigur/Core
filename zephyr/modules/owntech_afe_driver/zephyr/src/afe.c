@@ -41,6 +41,9 @@ LOG_MODULE_REGISTER(owntech_afe, CONFIG_OWNTECH_AFE_DRIVER_LOG_LEVEL);
 #define AFE_DAC_READY            BIT(7)
 #define AFE_DAC_INTERNAL_REF     BIT(7)
 #define AFE_DAC_GAIN_X2          BIT(4)
+#define AFE_IDENTIFY_DEFAULT_HZ  2U
+#define AFE_IDENTIFY_DEFAULT_MS  3000U
+#define AFE_IDENTIFY_MAX_HZ      20U
 
 struct afe_config {
 	struct i2c_dt_spec gpio_i2c;
@@ -55,8 +58,13 @@ struct afe_config {
 
 struct afe_data {
 	struct k_mutex lock;
+	struct k_work_delayable identify_work;
+	const struct device *dev;
+	int64_t identify_deadline_ms;
+	uint32_t identify_half_period_ms;
 	uint16_t outputs;
 	bool configured;
+	bool identifying;
 };
 
 static const float afe_gains[AFE_GAIN_COUNT] = {
@@ -195,6 +203,55 @@ static int afe_update_outputs_locked(const struct device *dev, uint16_t mask,
 			(data->outputs & (uint16_t)~mask) | (value & mask));
 }
 
+static void afe_identify_work_handler(struct k_work *work)
+{
+	struct k_work_delayable *delayable = k_work_delayable_from_work(work);
+	struct afe_data *data = CONTAINER_OF(delayable, struct afe_data,
+						 identify_work);
+	int64_t remaining;
+	uint32_t delay_ms;
+	int ret;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	if (!data->identifying) {
+		goto out;
+	}
+	remaining = data->identify_deadline_ms == 0 ? INT64_MAX :
+		data->identify_deadline_ms - k_uptime_get();
+	if (remaining <= 0) {
+		data->identifying = false;
+		ret = afe_update_outputs_locked(data->dev, AFE_GPIO_LED, 0U);
+		if (ret != 0) {
+			LOG_ERR("%s identify LED stop failed (%d)", data->dev->name,
+				ret);
+		}
+		goto out;
+	}
+	if (data->identify_half_period_ms != 0U) {
+		uint16_t next = (data->outputs & AFE_GPIO_LED) == 0U ?
+				AFE_GPIO_LED : 0U;
+
+		ret = afe_update_outputs_locked(data->dev, AFE_GPIO_LED, next);
+		if (ret != 0) {
+			data->identifying = false;
+			LOG_ERR("%s identify LED update failed (%d)",
+				data->dev->name, ret);
+			goto out;
+		}
+	}
+	if (data->identify_half_period_ms == 0U &&
+	    data->identify_deadline_ms == 0) {
+		goto out;
+	}
+	delay_ms = data->identify_half_period_ms == 0U ?
+		(uint32_t)MIN(remaining, (int64_t)UINT32_MAX) :
+		(uint32_t)MIN(remaining,
+			      (int64_t)data->identify_half_period_ms);
+	(void)k_work_reschedule(&data->identify_work, K_MSEC(delay_ms));
+out:
+	k_mutex_unlock(&data->lock);
+}
+
 static int afe_latch_locked(const struct device *dev)
 {
 	struct afe_data *data = dev->data;
@@ -270,6 +327,8 @@ static int afe_driver_init(const struct device *dev)
 	int ret;
 
 	k_mutex_init(&data->lock);
+	k_work_init_delayable(&data->identify_work, afe_identify_work_handler);
+	data->dev = dev;
 
 	if (!device_is_ready(config->gpio_i2c.bus)) {
 		return -ENODEV;
@@ -318,6 +377,8 @@ int afe_reset(const struct device *dev)
 	int ret;
 
 	k_mutex_lock(&data->lock, K_FOREVER);
+	data->identifying = false;
+	(void)k_work_cancel_delayable(&data->identify_work);
 	ret = afe_reset_locked(dev);
 	k_mutex_unlock(&data->lock);
 	return ret;
@@ -377,8 +438,69 @@ int afe_set_enabled(const struct device *dev, bool gain_enabled,
 
 int afe_set_led(const struct device *dev, bool enabled)
 {
-	return afe_update_outputs(dev, AFE_GPIO_LED,
-				  enabled ? AFE_GPIO_LED : 0U);
+	struct afe_data *data = dev->data;
+	int ret;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	data->identifying = false;
+	(void)k_work_cancel_delayable(&data->identify_work);
+	ret = afe_update_outputs_locked(dev, AFE_GPIO_LED,
+					  enabled ? AFE_GPIO_LED : 0U);
+	k_mutex_unlock(&data->lock);
+	return ret;
+}
+
+int afe_identify_start(const struct device *dev, uint8_t frequency_hz,
+		       uint32_t duration_ms)
+{
+	struct afe_data *data = dev->data;
+	uint32_t delay_ms;
+	int ret;
+
+	if (frequency_hz > AFE_IDENTIFY_MAX_HZ) {
+		return -EINVAL;
+	}
+	k_mutex_lock(&data->lock, K_FOREVER);
+	data->identifying = false;
+	(void)k_work_cancel_delayable(&data->identify_work);
+	ret = afe_update_outputs_locked(dev, AFE_GPIO_LED, AFE_GPIO_LED);
+	if (ret == 0) {
+		data->identify_half_period_ms = frequency_hz == 0U ? 0U :
+			1000U / (2U * frequency_hz);
+		data->identify_deadline_ms = duration_ms == 0U ? 0 :
+			k_uptime_get() + duration_ms;
+		data->identifying = true;
+		if (frequency_hz != 0U || duration_ms != 0U) {
+			delay_ms = data->identify_half_period_ms == 0U ?
+				duration_ms : data->identify_half_period_ms;
+			if (duration_ms != 0U) {
+				delay_ms = MIN(delay_ms, duration_ms);
+			}
+			(void)k_work_reschedule(&data->identify_work,
+						K_MSEC(delay_ms));
+		}
+	}
+	k_mutex_unlock(&data->lock);
+	return ret;
+}
+
+int afe_identify(const struct device *dev)
+{
+	return afe_identify_start(dev, AFE_IDENTIFY_DEFAULT_HZ,
+				  AFE_IDENTIFY_DEFAULT_MS);
+}
+
+int afe_identify_stop(const struct device *dev)
+{
+	struct afe_data *data = dev->data;
+	int ret;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	data->identifying = false;
+	(void)k_work_cancel_delayable(&data->identify_work);
+	ret = afe_update_outputs_locked(dev, AFE_GPIO_LED, 0U);
+	k_mutex_unlock(&data->lock);
+	return ret;
 }
 
 int afe_dac_set_mv(const struct device *dev, enum afe_dac_channel channel,

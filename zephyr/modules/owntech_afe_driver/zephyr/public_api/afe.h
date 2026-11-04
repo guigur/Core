@@ -73,6 +73,22 @@ int afe_set_enabled(const struct device *dev, bool gain_enabled,
 /** Control the AFE status LED. */
 int afe_set_led(const struct device *dev, bool enabled);
 
+/** Identify this AFE by blinking its LED at 2 Hz for three seconds. */
+int afe_identify(const struct device *dev);
+
+/**
+ * Start LED identification without blocking the caller.
+ *
+ * Frequency is in complete on/off cycles per second (0..20). At 0 Hz the LED
+ * stays on. Duration is in milliseconds; 0 means continue until stopped.
+ * Starting again replaces the current identification pattern.
+ */
+int afe_identify_start(const struct device *dev, uint8_t frequency_hz,
+		       uint32_t duration_ms);
+
+/** Stop identification and switch off the LED. */
+int afe_identify_stop(const struct device *dev);
+
 /**
  * Set a volatile MCP4728 value in millivolts (0..4095).
  *
