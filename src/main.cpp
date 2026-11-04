@@ -6,6 +6,7 @@
 #include <zephyr/console/console.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/eeprom.h>
+#include <zephyr/drivers/i2c.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <afe.h>
@@ -18,6 +19,22 @@
 static const char *const afe_names[PEBB_AFE_COUNT] = {
     "V_HIGH", "V1_LOW", "V2_LOW", "V3_LOW", "I_HIGH",
     "I1_LOW", "I2_LOW", "I3_LOW", "SIN", "COS"
+};
+
+/* KiCad J822-J831: slot order differs from the logical AFE enum. */
+static const uint8_t afe_mux_channels[PEBB_AFE_COUNT] = {
+    1, 1, 0, 0, 1, 1, 0, 0, 0, 1
+};
+static const uint8_t afe_address_indices[PEBB_AFE_COUNT] = {
+    1, 0, 4, 1, 4, 2, 0, 3, 2, 3
+};
+static const char *const afe_ch0_slots[8] = {
+    "I2_LOW", "V3_LOW", "SIN", "I3_LOW", "V2_LOW",
+    "unexpected", "unexpected", "unexpected"
+};
+static const char *const afe_ch1_slots[8] = {
+    "V1_LOW", "V_HIGH", "I1_LOW", "COS", "I_HIGH",
+    "unexpected", "unexpected", "U839"
 };
 
 static int result(const char *name, int ret)
@@ -35,33 +52,112 @@ static bool parse(const char *s, unsigned long max, unsigned long *out)
     return errno == 0 && *end == '\0' && *out <= max;
 }
 
+/* Probe components independently, even when an AFE device failed init. */
+static void scan_afe_bus(pebb_i2c_bus_id bus_id, const char *name, bool dac_only)
+{
+    const struct device *bus = pebb_i2c_bus_get(bus_id);
+    uint8_t reg = 0x06; /* TCA9555 configuration pair: pointer write + read. */
+    uint8_t gpio[2];
+    uint8_t dac[24];
+    unsigned int found = 0;
+    unsigned int bus_errors = 0;
+
+    printk("\n%s - %s addresses:\n", name, dac_only ? "MCP4728" : "TCA9555");
+    if (!device_is_ready(bus)) {
+        printk("  bus not ready\n");
+        return;
+    }
+    for (uint8_t index = 0; index < 8; ++index) {
+        uint8_t addr = (dac_only ? 0x60 : 0x20) + index;
+        int ret = dac_only ? i2c_read(bus, dac, sizeof(dac), addr) :
+            i2c_write_read(bus, addr, &reg, 1, gpio, sizeof(gpio));
+        if (ret != 0) {
+            if (ret != -EIO && ret != -ENXIO) {
+                ++bus_errors;
+                printk("  0x%02x: I2C error %d\n", addr, ret);
+            }
+            continue;
+        }
+        ++found;
+        if (dac_only) {
+            bool plausible = true;
+            for (unsigned int ch = 0; ch < 4; ++ch) {
+                uint8_t ram = dac[6 * ch];
+                uint8_t eeprom = dac[6 * ch + 3];
+                if ((ram & 0x80) == 0 || ((ram >> 4) & 3) != ch ||
+                    ((eeprom >> 4) & 3) != ch ||
+                    (ram & 7) != (addr & 7) ||
+                    (eeprom & 7) != (addr & 7))
+                    plausible = false;
+            }
+            printk("  0x%02x: ACK; readback %s; first bytes %02x %02x %02x\n",
+                   addr, plausible ? "plausible" : "invalid (collision possible)",
+                   dac[0], dac[1], dac[2]);
+        } else {
+            const char *slot = bus_id == PEBB_I2C_AFE_MAIN ?
+                afe_ch0_slots[index] : afe_ch1_slots[index];
+            printk("  0x%02x: ACK; reg6=%02x %02x; expected %s\n",
+                   addr, gpio[0], gpio[1], slot);
+        }
+    }
+    if (found == 0) printk("  No response in this address range.\n");
+    printk("  Summary: %u responding address(es), %u bus error(s).\n",
+           found, bus_errors);
+}
+
+static void scan_afe_buses(bool dac_only)
+{
+    printk("\n=== %s PHYSICAL ADDRESS SCAN ===\n",
+           dac_only ? "DAC" : "GPIO");
+    scan_afe_bus(PEBB_I2C_AFE_MAIN, "U805 channel 0 (five AFEs)", dac_only);
+    scan_afe_bus(PEBB_I2C_AFE_SINCOS, "U805 channel 1 (five AFEs + U839)", dac_only);
+    printk("ACK confirms an address, not a unique chip or its physical slot.\n");
+}
+
 static int scan(void)
 {
     int errors = 0;
-    printk("PEBB: %s\n", pebb_is_ready() ? "READY" : "MISSING");
+    unsigned int mux_ready = 0;
+    unsigned int bus_ready = 0;
+    unsigned int hb_ready = 0;
+
+    printk("\n=== ZEPHYR DEVICE STATUS ===\n");
+    printk("PEBB board driver: %s\n", pebb_is_ready() ? "READY" : "NOT READY");
     errors += !pebb_is_ready();
     for (unsigned int i = 0; i < PEBB_MUX_COUNT; ++i) {
         bool ok = device_is_ready(pebb_mux_get((pebb_mux_id)i));
-        printk("mux %d: %s\n", i, ok ? "READY" : "MISSING");
+        mux_ready += ok;
         errors += !ok;
     }
     for (unsigned int i = 0; i < PEBB_I2C_BUS_COUNT; ++i) {
         bool ok = device_is_ready(pebb_i2c_bus_get((pebb_i2c_bus_id)i));
-        printk("bus %d: %s\n", i, ok ? "READY" : "MISSING");
+        bus_ready += ok;
         errors += !ok;
     }
+    printk("I2C mux drivers: %u/%u ready; logical buses: %u/%u ready\n",
+           mux_ready, PEBB_MUX_COUNT, bus_ready, PEBB_I2C_BUS_COUNT);
+    printk("PEBB I/O expanders: U838 alerts %s; U839 controls %s\n",
+           device_is_ready(pebb_alert_gpio_get()) ? "READY" : "NOT READY",
+           device_is_ready(pebb_control_gpio_get()) ? "READY" : "NOT READY");
+    printk("AFE driver initialization (logical name, expected GPIO/DAC):\n");
     for (unsigned int i = 0; i < PEBB_AFE_COUNT; ++i) {
         bool ok = device_is_ready(pebb_afe_get((pebb_afe_id)i));
-        printk("AFE %d %s: %s\n", i, afe_names[i], ok ? "READY" : "MISSING");
+        unsigned int address_index = afe_address_indices[i];
+        printk("  %-7s ch%u 0x%02x/0x%02x: %s\n", afe_names[i],
+               afe_mux_channels[i], 0x20 + address_index,
+               0x60 + address_index, ok ? "READY" : "NOT READY");
         errors += !ok;
     }
     for (unsigned int i = 0; i < PEBB_HB_COUNT; ++i) {
         bool ok = device_is_ready(pebb_hb_get((pebb_hb_id)i));
-        printk("HB %d: %s\n", i, ok ? "READY" : "MISSING");
+        hb_ready += ok;
         errors += !ok;
     }
     bool ok = device_is_ready(pebb_feeder_get());
-    printk("feeder: %s\nSCAN: %d missing\n", ok ? "READY" : "MISSING", errors + !ok);
+    printk("HB drivers: %u/%u ready; feeder: %s\n", hb_ready,
+           PEBB_HB_COUNT, ok ? "READY" : "NOT READY");
+    printk("Driver status cannot prove which physical slot responded.\n");
+    scan_afe_buses(false);
     return errors + !ok;
 }
 
@@ -217,10 +313,11 @@ static void exercise_all(void)
 
 static void help(void)
 {
-    printk("scan | test all|pebb|feeder|afe ID|all|hb ID|all\n");
+    printk("scan | dacscan | test all|pebb|feeder|afe ID|all|hb ID|all\n");
     printk("exercise all | exercise afe ID|all (changes AFE controls)\n");
     printk("afe ID reset|gain N|bw N|inputs PLUS MINUS|enable GAIN BW|led 0|1|dac CH MV\n");
     printk("afe ID identify [HZ [DURATION_MS]] | afe ID stop\n");
+    printk("afe ID provision CURRENT_DAC_ADDR (experimental EEPROM write; one AFE per branch)\n");
     printk("pebb term 0|1 | pebb scl 0|1 (PA15/PA13) | pebb fan ID ignore|critical | pebb ack\n");
     printk("feeder run 0|1 | feeder sample CODE | feeder flags VALUE | feeder flush\n");
     printk("hb ID write HOURS VMAX IMAX FLAGS (writes both TMP117 EEPROMs)\n");
@@ -238,7 +335,8 @@ static void command(char *line)
          p = strtok_r(NULL, " \t", &save)) a[n++] = p;
     if (!n) return;
     if (!strcmp(a[0], "help")) { help(); return; }
-    if (!strcmp(a[0], "scan")) { scan(); return; }
+    if (n == 1 && !strcmp(a[0], "scan")) { scan(); return; }
+    if (n == 1 && !strcmp(a[0], "dacscan")) { scan_afe_buses(true); return; }
     if (n == 2 && !strcmp(a[0], "exercise") && !strcmp(a[1], "all")) {
         exercise_all(); return;
     }
@@ -272,6 +370,17 @@ static void command(char *line)
     }
     if (!strcmp(a[0], "afe") && n >= 3 && parse(a[1], 9, &v[0])) {
         const struct device *dev = pebb_afe_get((pebb_afe_id)v[0]);
+        if (n == 4 && !strcmp(a[2], "provision") &&
+            parse(a[3], 0x67, &v[1]) && v[1] >= 0x60) {
+            printk("Experimental address write: %s ch%u 0x%02lx -> 0x%02x\n",
+                   afe_names[v[0]], afe_mux_channels[v[0]], v[1],
+                   0x60 + afe_address_indices[v[0]]);
+            int ret = afe_dac_provision_address_experimental(dev, v[1]);
+            result("DAC address change verified", ret);
+            if (ret == 0) printk("Power-cycle to retry AFE driver initialization.\n");
+            scan_afe_buses(true);
+            return;
+        }
         if (!device_is_ready(dev)) { result("AFE", -ENODEV); return; }
         int ret = -EINVAL;
         if (n == 3 && !strcmp(a[2], "reset")) ret = afe_reset(dev);
@@ -348,7 +457,9 @@ int main(void)
 {
     char line[128];
     size_t used = 0;
-    printk("\nPEBB driver bench. Type help, then test all.\n> ");
+    k_msleep(500);
+    printk("\n\n========== PEBB DRIVER BENCH READY ==========\n");
+    printk("Type help, scan, or dacscan.\n> ");
     while (true) {
         int c = console_getchar();
         if (c < 0) { k_msleep(10); continue; }

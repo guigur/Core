@@ -87,32 +87,70 @@
 		#size-cells = <0>;
 		status = "okay";
 
-		/* U805 channel 0: AFE1..AFE8. */
+		/* U805 channel 0: J823/J830/J825/J824/J829, five AFEs. */
 		pebb_afe_bus_0: i2c@0 {
 			compatible = "ti,tca9548a-channel";
 			reg = <0>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 
-			afe_v_high: afe@20 {
+			afe_i2_low: afe@20 {
 				compatible = "owntech,afe-v3";
 				reg = <0x20>;
 				dac-address = <0x60>;
 			};
 
-			afe_v1_low: afe@21 {
+			afe_v3_low: afe@21 {
 				compatible = "owntech,afe-v3";
 				reg = <0x21>;
 				dac-address = <0x61>;
 			};
 
-			afe_v2_low: afe@22 {
+			afe_sin: afe@22 {
 				compatible = "owntech,afe-v3";
 				reg = <0x22>;
 				dac-address = <0x62>;
 			};
 
-			afe_v3_low: afe@23 {
+			afe_i3_low: afe@23 {
+				compatible = "owntech,afe-v3";
+				reg = <0x23>;
+				dac-address = <0x63>;
+			};
+
+			afe_v2_low: afe@24 {
+				compatible = "owntech,afe-v3";
+				reg = <0x24>;
+				dac-address = <0x64>;
+			};
+		};
+
+		/* U805 channel 1: J828/J827/J831/J826/J822 and U839@0x27. */
+		pebb_afe_bus_1: i2c@1 {
+			compatible = "ti,tca9548a-channel";
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			afe_v1_low: afe@20 {
+				compatible = "owntech,afe-v3";
+				reg = <0x20>;
+				dac-address = <0x60>;
+			};
+
+			afe_v_high: afe@21 {
+				compatible = "owntech,afe-v3";
+				reg = <0x21>;
+				dac-address = <0x61>;
+			};
+
+			afe_i1_low: afe@22 {
+				compatible = "owntech,afe-v3";
+				reg = <0x22>;
+				dac-address = <0x62>;
+			};
+
+			afe_cos: afe@23 {
 				compatible = "owntech,afe-v3";
 				reg = <0x23>;
 				dac-address = <0x63>;
@@ -122,44 +160,6 @@
 				compatible = "owntech,afe-v3";
 				reg = <0x24>;
 				dac-address = <0x64>;
-			};
-
-			afe_i1_low: afe@25 {
-				compatible = "owntech,afe-v3";
-				reg = <0x25>;
-				dac-address = <0x65>;
-			};
-
-			afe_i2_low: afe@26 {
-				compatible = "owntech,afe-v3";
-				reg = <0x26>;
-				dac-address = <0x66>;
-			};
-
-			afe_i3_low: afe@27 {
-				compatible = "owntech,afe-v3";
-				reg = <0x27>;
-				dac-address = <0x67>;
-			};
-		};
-
-		/* U805 channel 1: AFE9, AFE10 and the unrelated U839 at 0x27. */
-		pebb_afe_bus_1: i2c@1 {
-			compatible = "ti,tca9548a-channel";
-			reg = <1>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			afe_sin: afe@20 {
-				compatible = "owntech,afe-v3";
-				reg = <0x20>;
-				dac-address = <0x60>;
-			};
-
-			afe_cos: afe@21 {
-				compatible = "owntech,afe-v3";
-				reg = <0x21>;
-				dac-address = <0x61>;
 			};
 
 			/* U839: A2=A1=A0=1. Controls TERM120 and U726 I2C_SEL. */

@@ -107,6 +107,17 @@ The MCP4728 address is independent. It is stored in MCP4728 EEPROM and is only
 declared with `dac-address`; this driver deliberately never changes it and never
 writes any DAC EEPROM value.
 
+On the AFE v3 PCB, TCA9555 P0.6 drives the MCP4728 LDAC input and P0.7 reads
+RDY/BSY. The LDAC pulse used by `afe_latch()` updates DAC outputs after an
+ordinary register write. It cannot select a DAC for EEPROM address programming:
+the MCP4728 requires LDAC to fall during the low part of bit 8 of the second
+byte of its *active* address-write transaction. The TCA9555 shares the same
+SCL/SDA wires, so its output cannot be changed by a separate I²C transaction
+at that instant. RDY/BSY is a status output, not a command input. Address
+programming therefore needs a separately timed LDAC connection, or DACs
+preprogrammed to unique addresses before they share a bus. See the MCP4728
+datasheet, section 5.6.8, for the exact timing.
+
 ## Application API
 
 Each node creates a normal Zephyr device. Obtain every AFE independently by its
@@ -173,16 +184,20 @@ uses PB7 on the SPIN board.
 
 | Functional ID | Mux channel | TCA9555 | MCP4728 |
 | --- | ---: | ---: | ---: |
-| `PEBB_AFE_V_HIGH` | 0 | `0x20` | `0x60` |
-| `PEBB_AFE_V1_LOW` | 0 | `0x21` | `0x61` |
-| `PEBB_AFE_V2_LOW` | 0 | `0x22` | `0x62` |
-| `PEBB_AFE_V3_LOW` | 0 | `0x23` | `0x63` |
-| `PEBB_AFE_I_HIGH` | 0 | `0x24` | `0x64` |
-| `PEBB_AFE_I1_LOW` | 0 | `0x25` | `0x65` |
-| `PEBB_AFE_I2_LOW` | 0 | `0x26` | `0x66` |
-| `PEBB_AFE_I3_LOW` | 0 | `0x27` | `0x67` |
-| `PEBB_AFE_SIN` | 1 | `0x20` | `0x60` |
-| `PEBB_AFE_COS` | 1 | `0x21` | `0x61` |
+| `PEBB_AFE_V_HIGH` | 1 | `0x21` | `0x61` |
+| `PEBB_AFE_V1_LOW` | 1 | `0x20` | `0x60` |
+| `PEBB_AFE_V2_LOW` | 0 | `0x24` | `0x64` |
+| `PEBB_AFE_V3_LOW` | 0 | `0x21` | `0x61` |
+| `PEBB_AFE_I_HIGH` | 1 | `0x24` | `0x64` |
+| `PEBB_AFE_I1_LOW` | 1 | `0x22` | `0x62` |
+| `PEBB_AFE_I2_LOW` | 0 | `0x20` | `0x60` |
+| `PEBB_AFE_I3_LOW` | 0 | `0x23` | `0x63` |
+| `PEBB_AFE_SIN` | 0 | `0x22` | `0x62` |
+| `PEBB_AFE_COS` | 1 | `0x23` | `0x63` |
+
+The TCA9555 addresses follow the connector A0/A1/A2 straps. The MCP4728
+addresses shown are expected software settings, stored in each DAC EEPROM;
+an unprogrammed DAC normally responds at `0x60`.
 
 The schematic leaves the ten AFE interrupt outputs unconnected, so the PEBB
 nodes do not declare `int-gpios`. The group helper provides stable functional

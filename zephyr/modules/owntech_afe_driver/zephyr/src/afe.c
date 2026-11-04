@@ -276,11 +276,6 @@ static int afe_reset_locked(const struct device *dev)
 
 	data->configured = false;
 
-	ret = afe_dac_read_raw(config, raw);
-	if (ret != 0 || (raw[0] & AFE_DAC_READY) == 0U) {
-		return ret != 0 ? ret : -EBUSY;
-	}
-
 	outputs = AFE_GPIO_LDAC | AFE_GPIO_GAIN_OFF | AFE_GPIO_BANDWIDTH_OFF |
 		  ((uint16_t)config->startup_gain << 12) |
 		  config->startup_bandwidth;
@@ -298,13 +293,17 @@ static int afe_reset_locked(const struct device *dev)
 	}
 
 	data->outputs = outputs;
-	data->configured = true;
+
+	/* Initialize the expander even when the DAC has not been addressed yet. */
+	ret = afe_dac_read_raw(config, raw);
+	if (ret != 0 || (raw[0] & AFE_DAC_READY) == 0U) {
+		return ret != 0 ? ret : -EBUSY;
+	}
 
 	for (uint8_t channel = 0; channel < AFE_DAC_CHANNEL_COUNT; ++channel) {
 		ret = afe_dac_write_raw(config, channel,
 					config->startup_dac_mv[channel], true);
 		if (ret != 0) {
-			data->configured = false;
 			return ret;
 		}
 	}
@@ -313,8 +312,8 @@ static int afe_reset_locked(const struct device *dev)
 	if (ret == 0) {
 		ret = afe_dac_verify(config, config->startup_dac_mv);
 	}
-	if (ret != 0) {
-		data->configured = false;
+	if (ret == 0) {
+		data->configured = true;
 	}
 
 	return ret;
@@ -380,6 +379,96 @@ int afe_reset(const struct device *dev)
 	data->identifying = false;
 	(void)k_work_cancel_delayable(&data->identify_work);
 	ret = afe_reset_locked(dev);
+	k_mutex_unlock(&data->lock);
+	return ret;
+}
+
+int afe_dac_provision_address_experimental(const struct device *dev,
+					   uint8_t current_address)
+{
+	const struct afe_config *config = dev->config;
+	struct afe_data *data = dev->data;
+	uint8_t raw[AFE_DAC_READ_SIZE];
+	uint16_t outputs;
+	uint8_t old_bits;
+	uint8_t new_bits;
+	int ret;
+	int restore_ret;
+	int command_ret = -EIO;
+
+	if (current_address < 0x60U || current_address > 0x67U ||
+	    config->dac_address < 0x60U || config->dac_address > 0x67U ||
+	    current_address == config->dac_address) {
+		return -EINVAL;
+	}
+	if (!device_is_ready(config->gpio_i2c.bus)) {
+		return -ENODEV;
+	}
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = afe_gpio_read_pair(config, AFE_GPIO_REG_OUTPUT, &outputs);
+	if (ret != 0) {
+		goto out;
+	}
+	ret = i2c_read(config->gpio_i2c.bus, raw, sizeof(raw),
+		       current_address);
+	if (ret != 0) {
+		goto out;
+	}
+	old_bits = current_address & 7U;
+	new_bits = config->dac_address & 7U;
+	for (uint8_t channel = 0; channel < AFE_DAC_CHANNEL_COUNT; ++channel) {
+		uint8_t header = raw[channel * 6U];
+
+		if ((header & AFE_DAC_READY) == 0U ||
+		    ((header >> 4) & 3U) != channel ||
+		    (header & 7U) != old_bits) {
+			ret = -EIO;
+			goto out;
+		}
+	}
+	if (i2c_read(config->gpio_i2c.bus, raw, sizeof(raw),
+		     config->dac_address) == 0) {
+		ret = -EADDRINUSE;
+		goto out;
+	}
+
+	/* Closest possible attempt: LDAC falls before, not during, byte two. */
+	ret = afe_gpio_write_pair(config, AFE_GPIO_REG_OUTPUT,
+				  outputs | AFE_GPIO_LDAC);
+	if (ret != 0) {
+		goto out;
+	}
+	ret = afe_gpio_write_pair(config, AFE_GPIO_REG_OUTPUT,
+				  outputs & (uint16_t)~AFE_GPIO_LDAC);
+	if (ret != 0) {
+		goto restore;
+	}
+	const uint8_t command[] = {
+		(uint8_t)(0x61U | (old_bits << 2)),
+		(uint8_t)(0x62U | (new_bits << 2)),
+		(uint8_t)(0x63U | (new_bits << 2)),
+	};
+	command_ret = i2c_write(config->gpio_i2c.bus, command,
+				sizeof(command), current_address);
+restore:
+	restore_ret = afe_gpio_write_pair(config, AFE_GPIO_REG_OUTPUT,
+					  outputs | AFE_GPIO_LDAC);
+	if (restore_ret != 0) {
+		ret = restore_ret;
+		goto out;
+	}
+	k_msleep(100);
+	ret = i2c_read(config->gpio_i2c.bus, raw, sizeof(raw),
+		       config->dac_address);
+	if (ret != 0 || (raw[0] & 7U) != new_bits ||
+	    (raw[0] & AFE_DAC_READY) == 0U) {
+		ret = command_ret != 0 ? command_ret : -EIO;
+		goto out;
+	}
+	ret = i2c_read(config->gpio_i2c.bus, raw, sizeof(raw),
+		       current_address) == 0 ? -EADDRINUSE : 0;
+out:
 	k_mutex_unlock(&data->lock);
 	return ret;
 }

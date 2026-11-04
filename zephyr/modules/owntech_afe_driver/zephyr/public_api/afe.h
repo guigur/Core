@@ -102,12 +102,27 @@ int afe_dac_set_mv(const struct device *dev, enum afe_dac_channel channel,
 int afe_dac_set_all_mv(const struct device *dev,
 		       const uint16_t millivolts[AFE_DAC_CHANNEL_COUNT]);
 
-/** Pulse the MCP4728 LDAC signal through the TCA9555. */
+/**
+ * Pulse MCP4728 LDAC through the TCA9555 for DAC output updates.
+ * This cannot meet the bit-level LDAC timing for MCP4728 address programming.
+ */
 int afe_latch(const struct device *dev);
 
 /** Read all volatile and EEPROM MCP4728 channel states. */
 int afe_dac_read(const struct device *dev,
 		 struct afe_dac_state state[AFE_DAC_CHANNEL_COUNT]);
+
+/**
+ * Experimental MCP4728 address write from current_address to dac-address.
+ *
+ * Only one AFE/DAC may be connected to this mux branch at the source address.
+ * The TCA9555 cannot generate the datasheet's bit-timed LDAC edge, so this
+ * attempt is expected to fail on a conforming MCP4728. Success is reported
+ * only if the new address responds and the old address stops responding.
+ * Reboot after a successful EEPROM address change to retry Zephyr device init.
+ */
+int afe_dac_provision_address_experimental(const struct device *dev,
+					   uint8_t current_address);
 
 /** Read all TCA9555 register pairs. Reading inputs acknowledges its INT. */
 int afe_gpio_read(const struct device *dev, struct afe_gpio_state *state);

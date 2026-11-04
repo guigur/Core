@@ -10,8 +10,8 @@ the devices on those buses.
 | Device / bus | Parent | Address or channel |
 | --- | --- | --- |
 | U805 root TCA9548A | MCU I2C1 | `0x70` |
-| Eight main AFEs | U805 | channel 0 |
-| SIN/COS AFEs | U805 | channel 1 |
+| I2_LOW, V3_LOW, SIN, I3_LOW, V2_LOW AFEs | U805 | channel 0, TCA9555 `0x20`–`0x24` |
+| V1_LOW, V_HIGH, I1_LOW, COS, I_HIGH AFEs; U839 | U805 | channel 1, TCA9555 `0x20`–`0x24`; U839 `0x27` |
 | U814 power TCA9548A | U805 channel 4 via U804 isolator | `0x71` |
 | Low-voltage feeder | U814 | channel 0 |
 | U838 alert GPIO expander | U814 | channel 1, address `0x21` |
@@ -21,6 +21,10 @@ The U805 mux uses Zephyr's standard `ti,tca9548a` driver. U814 uses
 `owntech,tca9548a-nested` because its parent mux channel must initialize
 first. Applications use the child I2C bus devices directly. Zephyr selects the
 channels during each I2C operation; applications do not write mux masks.
+The matching MCP4728 addresses are configured as `0x60`–`0x64` on each
+channel. These DAC addresses are stored in the DAC EEPROM and must be
+programmed for each fitted AFE; the connector straps set only the TCA9555
+addresses.
 
 ## Board API
 
