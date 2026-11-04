@@ -186,7 +186,8 @@ uses PB7 on the SPIN board.
 
 The schematic leaves the ten AFE interrupt outputs unconnected, so the PEBB
 nodes do not declare `int-gpios`. The group helper provides stable functional
-names and best-effort bulk operations:
+names and best-effort bulk operations. This helper and the I2C topology now
+belong to the PEBB module; the AFE driver handles individual AFE devices:
 
 ```c
 #include <errno.h>

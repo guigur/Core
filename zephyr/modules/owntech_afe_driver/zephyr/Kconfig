@@ -24,11 +24,3 @@ module-help = Sets the log level for the OwnTech AFE driver.
 source "subsys/logging/Kconfig.template.log_config"
 
 endif
-
-config OWNTECH_PEBB_AFE_CONTROL
-	bool "PEBB ten-AFE group control"
-	default y if SHIELD_PEBB
-	depends on SHIELD_PEBB && OWNTECH_AFE_DRIVER
-	help
-	  Expose the ten PEBB AFE devices by their functional names and provide
-	  best-effort group operations. Requires the PEBB shield devicetree.

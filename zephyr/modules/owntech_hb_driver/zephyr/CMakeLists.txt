@@ -1,7 +1,5 @@
-if(CONFIG_OWNTECH_NESTED_TCA9548A OR CONFIG_OWNTECH_HB_DRIVER)
+if(CONFIG_OWNTECH_HB_DRIVER)
   zephyr_library()
-  zephyr_library_sources_ifdef(CONFIG_OWNTECH_NESTED_TCA9548A src/nested_tca9548a.c)
   zephyr_library_sources_ifdef(CONFIG_OWNTECH_HB_DRIVER src/hb.c)
-  zephyr_library_sources_ifdef(CONFIG_OWNTECH_PEBB_HB_CONTROL src/pebb_hb.c)
   zephyr_include_directories_ifdef(CONFIG_OWNTECH_HB_DRIVER public_api)
 endif()

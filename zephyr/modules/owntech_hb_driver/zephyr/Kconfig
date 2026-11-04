@@ -1,25 +1,3 @@
-config OWNTECH_NESTED_TCA9548A
-	bool "OwnTech nested TCA9548A support"
-	default y if DT_HAS_OWNTECH_TCA9548A_NESTED_ENABLED
-	depends on DT_HAS_OWNTECH_TCA9548A_NESTED_ENABLED
-	select I2C
-	help
-	  Enable a TCA9548A instance located behind a channel of another I2C
-	  multiplexer. Separate initialization priorities ensure that the parent
-	  channel is ready before the nested switch.
-
-if OWNTECH_NESTED_TCA9548A
-
-config OWNTECH_NESTED_TCA9548A_ROOT_INIT_PRIORITY
-	int "Nested TCA9548A root initialization priority"
-	default 52
-
-config OWNTECH_NESTED_TCA9548A_CHANNEL_INIT_PRIORITY
-	int "Nested TCA9548A channel initialization priority"
-	default 53
-
-endif
-
 config OWNTECH_HB_DRIVER
 	bool "OwnTech half-bridge monitoring driver"
 	default y if DT_HAS_OWNTECH_HB_BOARD_ENABLED
@@ -39,10 +17,3 @@ config OWNTECH_HB_DRIVER_INIT_PRIORITY
 	  Must be greater than the sensor, EEPROM and GPIO expander priorities.
 
 endif
-
-config OWNTECH_PEBB_HB_CONTROL
-	bool "PEBB three-HB group control"
-	default y if SHIELD_PEBB
-	depends on SHIELD_PEBB && OWNTECH_HB_DRIVER
-	help
-	  Expose the three PEBB half-bridge monitoring devices by position.

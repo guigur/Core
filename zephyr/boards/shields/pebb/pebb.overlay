@@ -9,6 +9,28 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
 
 / {
+	pebb: pebb {
+		compatible = "owntech,pebb";
+		root-i2c-mux = <&pebb_i2c_mux>;
+		power-i2c-mux = <&pebb_power_i2c_mux>;
+		alert-gpio-expander = <&pebb_hb_alerts>;
+		control-gpio-expander = <&pebb_control_io>;
+		fan-fault-gpios = <&pebb_hb_alerts 7 GPIO_ACTIVE_LOW>,
+				  <&pebb_hb_alerts 14 GPIO_ACTIVE_LOW>,
+				  <&pebb_hb_alerts 15 GPIO_ACTIVE_LOW>;
+		termination-gpios = <&pebb_control_io 0 GPIO_ACTIVE_HIGH>;
+		i2c-scl-select-gpios = <&pebb_control_io 5 GPIO_ACTIVE_HIGH>;
+		feeder = <&low_voltage_feeder>;
+		afe-main-bus = <&pebb_afe_bus_0>;
+		afe-sincos-bus = <&pebb_afe_bus_1>;
+		power-bus = <&pebb_power_i2c_bus>;
+		feeder-bus = <&feeder_i2c_bus>;
+		power-io-bus = <&pebb_power_io_bus>;
+		hb1-bus = <&hb1_i2c_bus>;
+		hb2-bus = <&hb2_i2c_bus>;
+		hb3-bus = <&hb3_i2c_bus>;
+	};
+
 	low_voltage_feeder: low-voltage-feeder {
 		compatible = "owntech,low-voltage-feeder";
 		eeprom = <&feeder_eeprom>;
@@ -138,6 +160,15 @@
 				compatible = "owntech,afe-v3";
 				reg = <0x21>;
 				dac-address = <0x61>;
+			};
+
+			/* U839: A2=A1=A0=1. Controls TERM120 and U726 I2C_SEL. */
+			pebb_control_io: gpio@27 {
+				compatible = "nxp,pca9555";
+				reg = <0x27>;
+				gpio-controller;
+				#gpio-cells = <2>;
+				ngpios = <16>;
 			};
 		};
 

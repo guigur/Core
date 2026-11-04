@@ -12,6 +12,8 @@ isolator. U814 is a second TCA9548A at address `0x71`. Zephyr 4.0 initializes
 all standard TCA9548A roots with one global priority, which is too early for a
 multiplexer behind another mux channel. The `owntech,tca9548a-nested` driver
 therefore initializes U814 after the U805 channel and before its own channels.
+The nested mux driver and `pebb_hb_get()` are part of the PEBB module; the HB
+driver handles individual half-bridge boards.
 
 | Board | U814 channel | HS TMP117 | LS TMP117 | U838 ALERT pins HS/LS |
 | --- | ---: | ---: | ---: | ---: |

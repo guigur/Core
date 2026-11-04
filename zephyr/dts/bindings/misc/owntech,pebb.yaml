@@ -1,0 +1,55 @@
+description: OwnTech PEBB board I2C topology
+compatible: "owntech,pebb"
+
+properties:
+  root-i2c-mux:
+    type: phandle
+    required: true
+  power-i2c-mux:
+    type: phandle
+    required: true
+  alert-gpio-expander:
+    type: phandle
+    required: true
+  control-gpio-expander:
+    type: phandle
+    required: true
+  fan-fault-gpios:
+    type: phandle-array
+    required: true
+    description: Three active-low fan fault inputs on U838, ordered FAN1 to FAN3.
+  termination-gpios:
+    type: phandle-array
+    required: true
+    description: U839 TERM120 output; enables CAN and RS485 terminations together.
+  i2c-scl-select-gpios:
+    type: phandle-array
+    required: true
+    description: U839 output selecting U726 SCL input (low PA15, high PA13).
+  feeder:
+    type: phandle
+    required: true
+  afe-main-bus:
+    type: phandle
+    required: true
+  afe-sincos-bus:
+    type: phandle
+    required: true
+  power-bus:
+    type: phandle
+    required: true
+  feeder-bus:
+    type: phandle
+    required: true
+  power-io-bus:
+    type: phandle
+    required: true
+  hb1-bus:
+    type: phandle
+    required: true
+  hb2-bus:
+    type: phandle
+    required: true
+  hb3-bus:
+    type: phandle
+    required: true

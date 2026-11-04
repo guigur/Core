@@ -1,0 +1,56 @@
+config OWNTECH_NESTED_TCA9548A
+	bool "OwnTech nested TCA9548A support"
+	default y if DT_HAS_OWNTECH_TCA9548A_NESTED_ENABLED
+	depends on DT_HAS_OWNTECH_TCA9548A_NESTED_ENABLED
+	select I2C
+	help
+	  Support U814 behind the U805 power-domain channel.
+
+if OWNTECH_NESTED_TCA9548A
+config OWNTECH_NESTED_TCA9548A_ROOT_INIT_PRIORITY
+	int "Nested TCA9548A root initialization priority"
+	default 52
+config OWNTECH_NESTED_TCA9548A_CHANNEL_INIT_PRIORITY
+	int "Nested TCA9548A channel initialization priority"
+	default 53
+endif
+
+config OWNTECH_PEBB_DRIVER
+	bool "PEBB board I2C topology driver"
+	default y if SHIELD_PEBB
+	depends on SHIELD_PEBB && OWNTECH_NESTED_TCA9548A
+	help
+	  Expose the PEBB I2C switches, their channels and the alert GPIO
+	  expander as a board-level device. External plug-in cards remain optional.
+
+if OWNTECH_PEBB_DRIVER
+config OWNTECH_PEBB_DRIVER_INIT_PRIORITY
+	int "PEBB board device initialization priority"
+	default 85
+	help
+	  Must follow the I2C multiplexers and GPIO expander.
+
+config OWNTECH_PEBB_FAN_POLL_MS
+	int "PEBB fan fault polling period in milliseconds"
+	range 10 10000
+	default 250
+	help
+	  U838's interrupt pin is not wired to the MCU. Poll the three fan
+	  tach watchdog outputs at this interval. The application should enable
+	  critical monitoring only after a fan has had time to start.
+endif
+
+config OWNTECH_PEBB_AFE_CONTROL
+	bool "PEBB ten-AFE group control"
+	default y if SHIELD_PEBB
+	depends on OWNTECH_PEBB_DRIVER && OWNTECH_AFE_DRIVER
+	help
+	  Expose the ten PEBB AFE devices by their functional names and
+	  provide best-effort group operations.
+
+config OWNTECH_PEBB_HB_CONTROL
+	bool "PEBB three-HB group control"
+	default y if SHIELD_PEBB
+	depends on OWNTECH_PEBB_DRIVER && OWNTECH_HB_DRIVER
+	help
+	  Expose the three PEBB half-bridge devices by position.
