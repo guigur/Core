@@ -77,3 +77,21 @@ int ret = hb_eeprom_read_word(hb, HB_HIGH_SIDE, 0, &board_code);
 EEPROM writes are unlocked, performed and read back for verification. They
 must only be used for persistent configuration or identification data, never
 as periodic logging storage. The driver performs no EEPROM write at startup.
+
+## Module operating record, version 1
+
+The two TMP117s store one 8-byte record. The high-side sensor contains byte 0
+(version `HB_MODULE_DATA_VERSION`, currently 1) and bytes 1–3 (24-bit operating
+hours, little-endian). The low-side sensor contains bytes 4–7: 12-bit maximum
+voltage, 12-bit maximum current and 8-bit flags. Byte 5 packs voltage bits
+11–8 in its low nibble and current bits 3–0 in its high nibble. There is no
+reserved record byte.
+
+`hb_module_data_read()` rejects an unknown version with `-EPROTONOSUPPORT`.
+Set `.version = HB_MODULE_DATA_VERSION` before calling
+`hb_module_data_write()`. The writer verifies each EEPROM word and writes the
+high-side word containing the version last. An older unversioned record must
+be migrated using its known old contents; its first hour byte can
+coincidentally equal the new version, so version alone cannot reliably detect
+the old layout. See the internal wiki's half-bridge EEPROM map for the full
+byte table.

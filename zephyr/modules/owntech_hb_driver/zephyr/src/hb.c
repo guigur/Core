@@ -237,16 +237,19 @@ int hb_module_data_read(const struct device *dev,
 	if (ret != 0) {
 		return ret;
 	}
+	if (bytes[0] != HB_MODULE_DATA_VERSION) {
+		return -EPROTONOSUPPORT;
+	}
 
-	module_data->operating_hours = (uint32_t)bytes[0] |
-				       ((uint32_t)bytes[1] << 8) |
-				       ((uint32_t)bytes[2] << 16);
-	module_data->max_voltage_code = (uint16_t)bytes[3] |
-					((uint16_t)(bytes[4] & 0x0FU) << 8);
-	module_data->max_current_code = (uint16_t)(bytes[4] >> 4) |
-					((uint16_t)bytes[5] << 4);
-	module_data->flags = bytes[6];
-	module_data->reserved = bytes[7];
+	module_data->version = bytes[0];
+	module_data->operating_hours = (uint32_t)bytes[1] |
+				       ((uint32_t)bytes[2] << 8) |
+				       ((uint32_t)bytes[3] << 16);
+	module_data->max_voltage_code = (uint16_t)bytes[4] |
+					((uint16_t)(bytes[5] & 0x0FU) << 8);
+	module_data->max_current_code = (uint16_t)(bytes[5] >> 4) |
+					((uint16_t)bytes[6] << 4);
+	module_data->flags = bytes[7];
 	return 0;
 }
 
@@ -259,25 +262,32 @@ int hb_module_data_write(const struct device *dev,
 	int ret = 0;
 
 	if (module_data == NULL ||
+	    module_data->version != HB_MODULE_DATA_VERSION ||
 	    module_data->operating_hours > HB_MODULE_RUNTIME_HOURS_MAX ||
 	    module_data->max_voltage_code > HB_MODULE_MEASUREMENT_MAX ||
 	    module_data->max_current_code > HB_MODULE_MEASUREMENT_MAX) {
 		return -EINVAL;
 	}
 
-	bytes[0] = (uint8_t)module_data->operating_hours;
-	bytes[1] = (uint8_t)(module_data->operating_hours >> 8);
-	bytes[2] = (uint8_t)(module_data->operating_hours >> 16);
-	bytes[3] = (uint8_t)module_data->max_voltage_code;
-	bytes[4] = (uint8_t)((module_data->max_voltage_code >> 8) |
+	bytes[0] = module_data->version;
+	bytes[1] = (uint8_t)module_data->operating_hours;
+	bytes[2] = (uint8_t)(module_data->operating_hours >> 8);
+	bytes[3] = (uint8_t)(module_data->operating_hours >> 16);
+	bytes[4] = (uint8_t)module_data->max_voltage_code;
+	bytes[5] = (uint8_t)((module_data->max_voltage_code >> 8) |
 			     ((module_data->max_current_code & 0x0FU) << 4));
-	bytes[5] = (uint8_t)(module_data->max_current_code >> 4);
-	bytes[6] = module_data->flags;
-	bytes[7] = module_data->reserved;
+	bytes[6] = (uint8_t)(module_data->max_current_code >> 4);
+	bytes[7] = module_data->flags;
 
 	k_mutex_lock(&data->lock, K_FOREVER);
-	for (size_t side = 0; side < 2U && ret == 0; ++side) {
-		for (size_t slot = 0; slot < 2U && ret == 0; ++slot) {
+	/* Write low-side data first and the high-side version word last. */
+	for (size_t side_index = 0; side_index < 2U && ret == 0;
+	     ++side_index) {
+		size_t side = side_index == 0U ? HB_LOW_SIDE : HB_HIGH_SIDE;
+
+		for (size_t slot_index = 0; slot_index < 2U && ret == 0;
+		     ++slot_index) {
+			size_t slot = slot_index == 0U ? 1U : 0U;
 			uint8_t word_index = slot == 0U ? 1U : 3U;
 			size_t offset = side * 4U + slot * 2U;
 
