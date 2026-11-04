@@ -12,7 +12,8 @@ fields are little-endian.
 
 | Record byte(s) | Size | Field | Meaning |
 | --- | ---: | --- | --- |
-| 0..1 | 2 | Magic | `0x3246`, bytes `46 32` (`F2`) |
+| 0 | 1 | Type | `0x01` = low-voltage feeder; `0x02` = high-voltage feeder (reserved, rejected by this driver) |
+| 1 | 1 | Version | `0x01` |
 | 2..3 | 2 | Sequence | Incremented per successful checkpoint; wraps modulo 2^16 |
 | 4..6 | 3 | Operating hours | Completed whole hours, unsigned 24-bit |
 | 7..8 | 2 | Minimum voltage code | Unsigned raw measurement code |
@@ -21,8 +22,10 @@ fields are little-endian.
 | 12..15 | 4 | CRC-32 | `crc32_ieee()` over bytes 0..11 |
 
 Record bases are `0x00`, `0x10`, `0x20`, ... `0xF0`. The driver scans the
-records at boot and loads the valid record with the newest sequence. A torn or
-corrupted record fails the CRC and is ignored.
+records at boot and loads the valid record with the newest sequence. The
+low-voltage driver also reads legacy records beginning with `46 32` (`F2`) so
+existing operating hours are retained; the next checkpoint uses the new
+`01 01` header. A torn or corrupted record fails the CRC and is ignored.
 
 ## Persistence and API
 

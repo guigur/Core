@@ -18,6 +18,12 @@ extern "C" {
 #define FEEDER_RUNTIME_HOURS_MAX 0xFFFFFFUL
 #define FEEDER_VOLTAGE_CODE_MAX  0xFFFFU
 
+/* EEPROM record header. This driver writes LOW records; HIGH is reserved for
+ * a future high-voltage feeder using the same record layout. */
+#define FEEDER_RECORD_TYPE_LOW  0x01U
+#define FEEDER_RECORD_TYPE_HIGH 0x02U
+#define FEEDER_RECORD_VERSION   0x01U
+
 #define FEEDER_FLAG_FAULT   (1U << 0)
 #define FEEDER_FLAG_WARNING (1U << 1)
 

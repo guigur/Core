@@ -25,7 +25,7 @@
 LOG_MODULE_REGISTER(owntech_feeder);
 
 #define FEEDER_RECORD_SIZE       16U
-#define FEEDER_RECORD_MAGIC      0x3246U /* "F2" */
+#define FEEDER_LEGACY_RECORD_MAGIC 0x3246U /* Old "F2" header */
 #define FEEDER_RECORD_DATA_SIZE  12U
 #define FEEDER_MINUTE_MS         60000ULL
 #define FEEDER_HOUR_MS           3600000ULL
@@ -68,7 +68,12 @@ static bool feeder_record_decode(const uint8_t record[FEEDER_RECORD_SIZE],
 				 uint16_t *voltage_min, uint16_t *voltage_max,
 				 uint8_t *flags)
 {
-	if (sys_get_le16(&record[0]) != FEEDER_RECORD_MAGIC ||
+	bool current_format = record[0] == FEEDER_RECORD_TYPE_LOW &&
+			      record[1] == FEEDER_RECORD_VERSION;
+	bool legacy_format = sys_get_le16(&record[0]) ==
+			     FEEDER_LEGACY_RECORD_MAGIC;
+
+	if ((!current_format && !legacy_format) ||
 	    sys_get_le32(&record[12]) != feeder_record_crc(record)) {
 		return false;
 	}
@@ -87,7 +92,8 @@ static void feeder_record_encode(uint8_t record[FEEDER_RECORD_SIZE],
 				 uint16_t voltage_min, uint16_t voltage_max,
 				 uint8_t flags)
 {
-	sys_put_le16(FEEDER_RECORD_MAGIC, &record[0]);
+	record[0] = FEEDER_RECORD_TYPE_LOW;
+	record[1] = FEEDER_RECORD_VERSION;
 	sys_put_le16(sequence, &record[2]);
 	record[4] = (uint8_t)hours;
 	record[5] = (uint8_t)(hours >> 8);
