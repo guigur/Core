@@ -16,10 +16,12 @@
 extern "C" {
 #endif
 
-#define HB_TMP117_EEPROM_WORD_COUNT 4U
-#define HB_TMP117_EEPROM_OFFSET_WORD 2U
 #define HB_MODULE_DATA_SIZE 8U
 #define HB_MODULE_DATA_VERSION 1U
+#define HB_SERIAL_NUMBER_OFFSET 0x10U
+#define HB_SERIAL_NUMBER_LENGTH 13U
+#define HB_PANEL_KEY_OFFSET 0x20U
+#define HB_PANEL_KEY_LENGTH 10U
 #define HB_MODULE_RUNTIME_HOURS_MAX 0xFFFFFFUL
 #define HB_MODULE_MEASUREMENT_MAX 0x0FFFU
 
@@ -40,13 +42,26 @@ enum hb_side {
 	HB_LOW_SIDE = 1,
 };
 
-/** Return the native Zephyr TMP117 sensor for one side. */
+/** Return the native Zephyr T117B sensor for one side. */
 const struct device *hb_sensor_device(const struct device *dev,
 				      enum hb_side side);
 
-/** Return the native Zephyr EEPROM device for one side. */
-const struct device *hb_eeprom_device(const struct device *dev,
-				      enum hb_side side);
+/** Return the shared 24C02S EEPROM device for this HB board. */
+const struct device *hb_eeprom_device(const struct device *dev);
+
+/** Read the 13-character serial number; output has room for a terminator. */
+int hb_serial_number_read(const struct device *dev,
+			  char out[HB_SERIAL_NUMBER_LENGTH + 1U]);
+
+/** Store exactly 13 printable ASCII characters and verify the EEPROM write. */
+int hb_serial_number_write(const struct device *dev, const char *serial);
+
+/** Read the 10-character panel access key; output has room for a terminator. */
+int hb_panel_key_read(const struct device *dev,
+		      char out[HB_PANEL_KEY_LENGTH + 1U]);
+
+/** Store exactly 10 printable ASCII characters and verify the EEPROM write. */
+int hb_panel_key_write(const struct device *dev, const char *key);
 
 /** Fetch and return the latest temperature through the Zephyr sensor API. */
 int hb_temperature_get(const struct device *dev, enum hb_side side,
@@ -57,37 +72,19 @@ int hb_temperature_get_millicelsius(const struct device *dev,
 				     enum hb_side side,
 				     int32_t *temperature_mc);
 
-/** Return 1 when the active-low TMP117 ALERT line is asserted, else 0. */
+/** Return 1 when the active-low T117B ALERT line is asserted, else 0. */
 int hb_alert_is_active(const struct device *dev, enum hb_side side);
-
-/**
- * Read one of the four 16-bit TMP117 EEPROM words.
- *
- * Word 2 is the TMP117 temperature-offset register and returns -EACCES.
- */
-int hb_eeprom_read_word(const struct device *dev, enum hb_side side,
-			uint8_t word, uint16_t *value);
-
-/**
- * Write and verify one user EEPROM word.
- *
- * Word 0 is the factory traceability ID and word 2 is the temperature-offset
- * location; both return -EACCES. EEPROM endurance is finite; this function
- * must not be called periodically.
- */
-int hb_eeprom_write_word(const struct device *dev, enum hb_side side,
-			 uint8_t word, uint16_t value);
 
 /** Read version 1 of the shared 8-byte record; reject other versions. */
 int hb_module_data_read(const struct device *dev,
 			struct hb_module_data *module_data);
 
 /**
- * Write the shared 8-byte operating data across both TMP117 EEPROMs.
+ * Write the shared 8-byte operating data at offset 0 of the 24C02S.
  *
  * Set version to HB_MODULE_DATA_VERSION. Voltage/current are raw 12-bit codes;
- * their physical scaling is application specific. The first EEPROM word
- * (traceability) and offset word are preserved.
+ * their physical scaling is application specific. Other EEPROM bytes are
+ * preserved. Writes are verified; callers must limit frequency for endurance.
  */
 int hb_module_data_write(const struct device *dev,
 			 const struct hb_module_data *module_data);

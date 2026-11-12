@@ -192,12 +192,15 @@ uses PB7 on the SPIN board.
 | `PEBB_AFE_I1_LOW` | 1 | `0x22` | `0x62` |
 | `PEBB_AFE_I2_LOW` | 0 | `0x20` | `0x60` |
 | `PEBB_AFE_I3_LOW` | 0 | `0x23` | `0x63` |
-| `PEBB_AFE_SIN` | 0 | `0x22` | `0x62` |
-| `PEBB_AFE_COS` | 1 | `0x23` | `0x63` |
+| `PEBB_AFE_ANALOG_1` | 0 | `0x22` | `0x62` |
+| `PEBB_AFE_ANALOG_2` | 1 | `0x23` | `0x63` |
 
 The TCA9555 addresses follow the connector A0/A1/A2 straps. The MCP4728
 addresses shown are expected software settings, stored in each DAC EEPROM;
 an unprogrammed DAC normally responds at `0x60`.
+ANALOG1 is the AFE806/J825 slot; ANALOG2 is AFE805/J826, following the
+PEBB PCB silkscreen. The former `PEBB_AFE_SIN` and `PEBB_AFE_COS` enum names
+remain as source-compatible aliases.
 
 The schematic leaves the ten AFE interrupt outputs unconnected, so the PEBB
 nodes do not declare `int-gpios`. The group helper provides stable functional

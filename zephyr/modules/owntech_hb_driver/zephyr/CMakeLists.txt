@@ -1,5 +1,6 @@
 if(CONFIG_OWNTECH_HB_DRIVER)
   zephyr_library()
   zephyr_library_sources_ifdef(CONFIG_OWNTECH_HB_DRIVER src/hb.c)
+  zephyr_library_sources_ifdef(CONFIG_OWNTECH_HB_DRIVER src/t117b.c)
   zephyr_include_directories_ifdef(CONFIG_OWNTECH_HB_DRIVER public_api)
 endif()

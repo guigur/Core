@@ -26,8 +26,8 @@ static const struct device *const pebb_afes[PEBB_AFE_COUNT] = {
 	[PEBB_AFE_I1_LOW] = PEBB_AFE_DEVICE(afe_i1_low),
 	[PEBB_AFE_I2_LOW] = PEBB_AFE_DEVICE(afe_i2_low),
 	[PEBB_AFE_I3_LOW] = PEBB_AFE_DEVICE(afe_i3_low),
-	[PEBB_AFE_SIN] = PEBB_AFE_DEVICE(afe_sin),
-	[PEBB_AFE_COS] = PEBB_AFE_DEVICE(afe_cos),
+	[PEBB_AFE_ANALOG_1] = PEBB_AFE_DEVICE(afe_analog_1),
+	[PEBB_AFE_ANALOG_2] = PEBB_AFE_DEVICE(afe_analog_2),
 };
 
 BUILD_ASSERT(ARRAY_SIZE(pebb_afes) == PEBB_AFE_COUNT);

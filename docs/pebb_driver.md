@@ -10,21 +10,29 @@ the devices on those buses.
 | Device / bus | Parent | Address or channel |
 | --- | --- | --- |
 | U805 root TCA9548A | MCU I2C1 | `0x70` |
-| I2_LOW, V3_LOW, SIN, I3_LOW, V2_LOW AFEs | U805 | channel 0, TCA9555 `0x20`–`0x24` |
-| V1_LOW, V_HIGH, I1_LOW, COS, I_HIGH AFEs; U839 | U805 | channel 1, TCA9555 `0x20`–`0x24`; U839 `0x27` |
+| I2_LOW, V3_LOW, ANALOG1, I3_LOW, V2_LOW AFEs | U805 | channel 0, TCA9555 `0x20`–`0x24` |
+| V1_LOW, V_HIGH, I1_LOW, ANALOG2, I_HIGH AFEs; U839 | U805 | channel 1, TCA9555 `0x20`–`0x24`; U839 `0x27` |
+| Feeder U101 EEPROM via J811/J101 | U805 | channel 2, address `0x50`, DGND domain |
 | U814 power TCA9548A | U805 channel 4 via U804 isolator | `0x71` |
-| Low-voltage feeder | U814 | channel 0 |
+| External power-blade I²C interface U809 | U814 | channel 0, PGND domain |
 | U838 alert GPIO expander | U814 | channel 1, address `0x21` |
-| HB1, HB2, HB3 | U814 | channels 2, 3, 4 |
+| HB1, HB2, HB3 | U814 | channels 2, 3, 4; T117B `0x40`/`0x41`, 24C02S `0x50` on each |
 
 The U805 mux uses Zephyr's standard `ti,tca9548a` driver. U814 uses
 `owntech,tca9548a-nested` because its parent mux channel must initialize
 first. Applications use the child I2C bus devices directly. Zephyr selects the
 channels during each I2C operation; applications do not write mux masks.
+The feeder EEPROM is powered from `+5V_DGND` and uses the six-pin J101
+connector. Its SDA/SCL pins mate with PEBB J811 on U805 channel 2. U809's
+separate SCL/SDA pair belongs to the PGND power blade behind U804 and U814;
+it is not the feeder U101 EEPROM path.
 The matching MCP4728 addresses are configured as `0x60`–`0x64` on each
 channel. These DAC addresses are stored in the DAC EEPROM and must be
 programmed for each fitted AFE; the connector straps set only the TCA9555
 addresses.
+The names ANALOG1/ANALOG2 match the PEBB PCB silkscreen near AFE806/J825
+and AFE805/J826. The bus API names are `PEBB_I2C_AFE_CH0` and
+`PEBB_I2C_AFE_CH1`; former names remain available as aliases.
 
 ## Board API
 
@@ -53,6 +61,11 @@ depends on the external feeder board. The functional group APIs remain
 
 Enable the shield with `board_shield = pebb`. Its `pebb.conf` enables
 `CONFIG_OWNTECH_PEBB_DRIVER`, the mux driver, and the component drivers.
+It also enables STM32 I2C bus recovery for I2C1 on PA15/PB7. An application
+can call `i2c_recover_bus(DEVICE_DT_GET(DT_NODELABEL(i2c1)))` when a transfer
+fails. The bench provides `i2crecover` and probes U805 afterward. Recovery
+does not reinitialize a Zephyr device whose boot initialization failed; that
+requires a separate retry design or a restart once the physical bus works.
 
 ## Fans, bus termination and SCL selection
 

@@ -8,8 +8,11 @@ IDs: AFEs 0–9 follow `pebb_afe_id`, and HB modules 0–2 follow `pebb_hb_id`.
 
 | Command | What it checks or changes |
 | --- | --- |
-| `scan` | Named Zephyr device status plus TCA9555 probes at `0x20`–`0x27` on both AFE I²C branches |
+| `scan` | Per-AFE driver readiness, independent TCA9555 and expected MCP4728 address responses, plus a physical TCA9555 scan on both AFE I²C branches |
 | `dacscan` | Separate MCP4728 probes at `0x60`–`0x67` on both branches, even if AFE drivers failed initialization |
+| `feederdiag` | Read-only probe of feeder EEPROM `0x50` on U805 channel 2, U814 `0x71` across U804, and U837/U838 behind U814 |
+| `hbdiag` | Read-only T117B ROM probes at `0x40`–`0x43` and 24C02S `0x50` on U814 channels 2–4, with the selected mux mask and driver readiness |
+| `i2crecover` | Pulse I2C1 SCL on PA15/PB7 using Zephyr's STM32 bus recovery, then probe root mux U805 at `0x70` |
 | `afe 2 provision 0x60` | Experimental MCP4728 EEPROM address attempt for V2_LOW, from `0x60` to configured `0x64`; requires V2_LOW alone on U805 channel 0 |
 | `test all` | Read-only checks of PEBB controls/fan status, every AFE GPIO/DAC, every HB temperature/alert/module record, and feeder EEPROM/data |
 | `test pebb`, `test feeder` | Read-only checks of one subsystem |
@@ -22,6 +25,32 @@ The test does not claim to validate analog gain or temperature accuracy: those
 need external stimulus or a reference instrument. An erased HB EEPROM is shown
 as blank; an unexpected record version or I²C failure is reported as an error.
 
+## Feeder I²C wiring
+
+The feeder schematic's J101 pin 1 (SDA), pin 2 (SCL), pins 3–4 (DGND),
+pin 5 (`+12V_DGND`) and pin 6 (`+5V_DGND`) match PEBB J811 pin-for-pin.
+Feeder EEPROM U101 is at `0x50` on **U805 channel 2**, before U804. The
+PEBB power blade U809 carries another I²C pair on the PGND side, exposed by
+U814 channel 0, but it is not wired to feeder U101 in these schematics.
+
+`feederdiag` reads U805 itself at `0x70`, U839 through channel 1, and the
+selected channel mask after probing feeder U101. A mask of `0x04` confirms
+that U805 selected channel 2; it does not prove that J811/J101 or the EEPROM
+responded. The command also tests the isolated U814 path separately. If
+`0x50` responds on U805 channel 2
+but the feeder driver is still `NOT READY`, reboot the MCU with the feeder
+power already applied: Zephyr device initialization runs at boot. U838 being
+`NOT READY` indicates a separate issue on the U804/U814 PGND side; it does
+not imply that the feeder EEPROM on J811 is absent.
+
+If I2C1 is stuck, run `i2crecover`, then `feederdiag` and `scan`. The shield
+enables `CONFIG_I2C_STM32_BUS_RECOVERY` with open-drain PA15 (SCL) and PB7
+(SDA). Recovery only attempts to release the electrical bus; it does not
+rerun Zephyr initialization for devices that failed at boot. PA15 must still
+be selected by U726. A device holding SDA low continuously, or an unpowered
+downstream branch, may require a power cycle after the electrical fault is
+removed.
+
 ## Diagnosing AFE address conflicts
 
 The updated PEBB schematic places five AFE connectors on each U805 channel.
@@ -31,13 +60,13 @@ The connector A0/A1/A2 straps set the TCA9555 address as follows:
 | --- | --- | --- | --- |
 | 0 | I2_LOW (J823) | `0x20` | `0x60` |
 | 0 | V3_LOW (J830) | `0x21` | `0x61` |
-| 0 | SIN (J825) | `0x22` | `0x62` |
+| 0 | ANALOG1 (J825, AFE806) | `0x22` | `0x62` |
 | 0 | I3_LOW (J824) | `0x23` | `0x63` |
 | 0 | V2_LOW (J829) | `0x24` | `0x64` |
 | 1 | V1_LOW (J828) | `0x20` | `0x60` |
 | 1 | V_HIGH (J827) | `0x21` | `0x61` |
 | 1 | I1_LOW (J831) | `0x22` | `0x62` |
-| 1 | COS (J826) | `0x23` | `0x63` |
+| 1 | ANALOG2 (J826, AFE805) | `0x23` | `0x63` |
 | 1 | I_HIGH (J822) | `0x24` | `0x64` |
 
 U839 is also on channel 1 at `0x27`. The MCP4728 addresses in the last column
@@ -45,9 +74,20 @@ are the **software configuration**, not connector straps: each DAC stores its
 address in its own EEPROM and normally starts at `0x60`. Each fitted board
 must have its DAC programmed to the expected address before two boards with
 the same DAC address share a channel.
+ANALOG1/ANALOG2 follow the PEBB PCB silkscreen: AFE806 at (67,49) is
+ANALOG1, and AFE805 at (76,72) is ANALOG2. Their analog connectors are J819
+and J820, respectively.
 
 `scan` and `dacscan` list **actual address responses on each mux channel**.
-The logical `READY` line shows which configured Zephyr device initialized; it
+The per-AFE `scan` row starts with the numeric ID used by `afe ID ...` and
+reports `ACK`, `NO` or `ERROR` separately for the
+TCA9555 and the **configured** MCP4728 address; `ACK_BAD` means the DAC
+answered but its 24-byte readback is implausible. If a DAC still has its
+factory `0x60` address in a slot expecting another address, the row shows
+`NO` for that DAC and `dacscan` shows the actual `0x60` response.
+The USB terminal uses ANSI colors in `scan`: white text, green for ready/ACK
+states, and red for not-ready/no-response/error states.
+The driver `READY` column shows which configured Zephyr device initialized; it
 does not prove which physical slot responded. If only `0x20` and `0x60`
 respond while a board is fitted in I2_LOW, that is the expected TCA9555 address
 for this slot; V2_LOW should respond at `0x24` on the same channel. If two boards on one
@@ -123,7 +163,7 @@ Identification runs in the driver work queue, so the console stays responsive.
 `afe ID led 0|1` and `afe ID reset` cancel a running identification.
 
 `afe ... dac` writes only MCP4728 RAM; it does not touch its EEPROM. `hb ...
-write` programs the TMP117 EEPROM, so use it sparingly and with intended data.
+write` programs the HB 24C02S EEPROM, so use it sparingly and with intended data.
 `feeder flush` checkpoints changed data to its wear-levelled EEPROM journal.
 `feeder sample` takes a raw measurement code; it does not sample an ADC. Feeder
 hours advance only while `feeder run 1` is active.

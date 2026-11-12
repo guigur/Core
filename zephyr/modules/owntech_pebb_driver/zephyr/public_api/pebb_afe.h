@@ -27,8 +27,11 @@ enum pebb_afe_id {
 	PEBB_AFE_I1_LOW,
 	PEBB_AFE_I2_LOW,
 	PEBB_AFE_I3_LOW,
-	PEBB_AFE_SIN,
-	PEBB_AFE_COS,
+	PEBB_AFE_ANALOG_1,
+	PEBB_AFE_ANALOG_2,
+	/* Source compatibility with the former slot names. */
+	PEBB_AFE_SIN = PEBB_AFE_ANALOG_1,
+	PEBB_AFE_COS = PEBB_AFE_ANALOG_2,
 };
 
 const struct device *pebb_afe_get(enum pebb_afe_id id);

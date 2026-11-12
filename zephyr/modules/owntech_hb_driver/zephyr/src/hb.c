@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -22,7 +23,7 @@
 
 struct hb_config {
 	const struct device *sensors[2];
-	const struct device *eeproms[2];
+	const struct device *eeprom;
 	struct gpio_dt_spec alerts[2];
 };
 
@@ -32,10 +33,10 @@ struct hb_data {
 
 BUILD_ASSERT(CONFIG_OWNTECH_HB_DRIVER_INIT_PRIORITY >
 	     CONFIG_SENSOR_INIT_PRIORITY,
-	     "HB driver must initialize after TMP117 sensors");
+	     "HB driver must initialize after T117B sensors");
 BUILD_ASSERT(CONFIG_OWNTECH_HB_DRIVER_INIT_PRIORITY >
 	     CONFIG_EEPROM_INIT_PRIORITY,
-	     "HB driver must initialize after TMP117 EEPROMs");
+	     "HB driver must initialize after the 24C02S EEPROM");
 #ifdef CONFIG_GPIO_PCA_SERIES
 BUILD_ASSERT(CONFIG_OWNTECH_HB_DRIVER_INIT_PRIORITY >
 	     CONFIG_GPIO_PCA_SERIES_INIT_PRIORITY,
@@ -54,10 +55,12 @@ static int hb_driver_init(const struct device *dev)
 	int ret;
 
 	k_mutex_init(&data->lock);
+	if (!device_is_ready(config->eeprom)) {
+		return -ENODEV;
+	}
 
 	for (size_t side = 0; side < ARRAY_SIZE(config->sensors); ++side) {
 		if (!device_is_ready(config->sensors[side]) ||
-		    !device_is_ready(config->eeproms[side]) ||
 		    !gpio_is_ready_dt(&config->alerts[side])) {
 			return -ENODEV;
 		}
@@ -79,12 +82,106 @@ const struct device *hb_sensor_device(const struct device *dev,
 	return hb_side_is_valid(side) ? config->sensors[side] : NULL;
 }
 
-const struct device *hb_eeprom_device(const struct device *dev,
-				      enum hb_side side)
+const struct device *hb_eeprom_device(const struct device *dev)
 {
 	const struct hb_config *config = dev->config;
+	return config->eeprom;
+}
 
-	return hb_side_is_valid(side) ? config->eeproms[side] : NULL;
+static int hb_text_read(const struct device *dev, off_t offset,
+			char *out, size_t length)
+{
+	const struct hb_config *config = dev->config;
+	struct hb_data *data = dev->data;
+	bool blank = true;
+	int ret;
+
+	if (out == NULL) {
+		return -EINVAL;
+	}
+	out[0] = '\0';
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = eeprom_read(config->eeprom, offset, out, length);
+	k_mutex_unlock(&data->lock);
+	if (ret != 0) {
+		out[0] = '\0';
+		return ret;
+	}
+	for (size_t i = 0; i < length; ++i) {
+		blank &= (uint8_t)out[i] == 0xffU;
+	}
+	if (blank) {
+		out[0] = '\0';
+		return -ENODATA;
+	}
+	for (size_t i = 0; i < length; ++i) {
+		if (out[i] < '!' || out[i] > '~') {
+			out[0] = '\0';
+			return -EILSEQ;
+		}
+	}
+	out[length] = '\0';
+	return 0;
+}
+
+static int hb_text_write(const struct device *dev, off_t offset,
+			 const char *value, size_t length)
+{
+	const struct hb_config *config = dev->config;
+	struct hb_data *data = dev->data;
+	char readback[HB_SERIAL_NUMBER_LENGTH];
+	int ret;
+
+	if (value == NULL) {
+		return -EINVAL;
+	}
+	for (size_t i = 0; i < length; ++i) {
+		if (value[i] < '!' || value[i] > '~') {
+			return -EINVAL;
+		}
+	}
+	if (value[length] != '\0') {
+		return -EINVAL;
+	}
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = eeprom_read(config->eeprom, offset, readback, length);
+	if (ret == 0 && memcmp(value, readback, length) != 0) {
+		ret = eeprom_write(config->eeprom, offset, value, length);
+		if (ret == 0) {
+			ret = eeprom_read(config->eeprom, offset, readback, length);
+		}
+	}
+	k_mutex_unlock(&data->lock);
+	if (ret != 0) {
+		return ret;
+	}
+	return memcmp(value, readback, length) == 0 ? 0 : -EIO;
+}
+
+int hb_serial_number_read(const struct device *dev,
+			  char out[HB_SERIAL_NUMBER_LENGTH + 1U])
+{
+	return hb_text_read(dev, HB_SERIAL_NUMBER_OFFSET, out,
+			    HB_SERIAL_NUMBER_LENGTH);
+}
+
+int hb_serial_number_write(const struct device *dev, const char *serial)
+{
+	return hb_text_write(dev, HB_SERIAL_NUMBER_OFFSET, serial,
+			     HB_SERIAL_NUMBER_LENGTH);
+}
+
+int hb_panel_key_read(const struct device *dev,
+		      char out[HB_PANEL_KEY_LENGTH + 1U])
+{
+	return hb_text_read(dev, HB_PANEL_KEY_OFFSET, out,
+			    HB_PANEL_KEY_LENGTH);
+}
+
+int hb_panel_key_write(const struct device *dev, const char *key)
+{
+	return hb_text_write(dev, HB_PANEL_KEY_OFFSET, key,
+			     HB_PANEL_KEY_LENGTH);
 }
 
 int hb_temperature_get(const struct device *dev, enum hb_side side,
@@ -146,84 +243,11 @@ int hb_alert_is_active(const struct device *dev, enum hb_side side)
 	return gpio_pin_get_dt(&config->alerts[side]);
 }
 
-int hb_eeprom_read_word(const struct device *dev, enum hb_side side,
-			uint8_t word, uint16_t *value)
-{
-	const struct hb_config *config = dev->config;
-	struct hb_data *data = dev->data;
-	int ret;
-
-	if (!hb_side_is_valid(side) || value == NULL ||
-	    word >= HB_TMP117_EEPROM_WORD_COUNT) {
-		return -EINVAL;
-	}
-	if (word == HB_TMP117_EEPROM_OFFSET_WORD) {
-		return -EACCES;
-	}
-
-	k_mutex_lock(&data->lock, K_FOREVER);
-	ret = eeprom_read(config->eeproms[side],
-			  (off_t)word * sizeof(*value), value, sizeof(*value));
-	k_mutex_unlock(&data->lock);
-	return ret;
-}
-
-int hb_eeprom_write_word(const struct device *dev, enum hb_side side,
-			 uint8_t word, uint16_t value)
-{
-	const struct hb_config *config = dev->config;
-	struct hb_data *data = dev->data;
-	uint16_t readback;
-	int ret;
-
-	if (!hb_side_is_valid(side) || word >= HB_TMP117_EEPROM_WORD_COUNT) {
-		return -EINVAL;
-	}
-	if (word == 0U || word == HB_TMP117_EEPROM_OFFSET_WORD) {
-		return -EACCES;
-	}
-
-	k_mutex_lock(&data->lock, K_FOREVER);
-	ret = eeprom_write(config->eeproms[side],
-			   (off_t)word * sizeof(value), &value, sizeof(value));
-	if (ret == 0) {
-		ret = eeprom_read(config->eeproms[side],
-				  (off_t)word * sizeof(value), &readback,
-				  sizeof(readback));
-	}
-	k_mutex_unlock(&data->lock);
-
-	return ret == 0 && readback != value ? -EIO : ret;
-}
-
-static int hb_module_data_read_locked(const struct device *dev,
-				      uint8_t bytes[HB_MODULE_DATA_SIZE])
-{
-	uint16_t word;
-	int ret;
-
-	for (size_t side = 0; side < 2U; ++side) {
-		for (size_t slot = 0; slot < 2U; ++slot) {
-			uint8_t word_index = slot == 0U ? 1U : 3U;
-			size_t offset = side * 4U + slot * 2U;
-
-			ret = eeprom_read(hb_eeprom_device(dev, (enum hb_side)side),
-					  (off_t)word_index * sizeof(word), &word,
-					  sizeof(word));
-			if (ret != 0) {
-				return ret;
-			}
-			bytes[offset] = (uint8_t)word;
-			bytes[offset + 1U] = (uint8_t)(word >> 8);
-		}
-	}
-	return 0;
-}
-
 int hb_module_data_read(const struct device *dev,
 			struct hb_module_data *module_data)
 {
 	struct hb_data *data = dev->data;
+	const struct hb_config *config = dev->config;
 	uint8_t bytes[HB_MODULE_DATA_SIZE];
 	int ret;
 
@@ -232,7 +256,7 @@ int hb_module_data_read(const struct device *dev,
 	}
 
 	k_mutex_lock(&data->lock, K_FOREVER);
-	ret = hb_module_data_read_locked(dev, bytes);
+	ret = eeprom_read(config->eeprom, 0, bytes, sizeof(bytes));
 	k_mutex_unlock(&data->lock);
 	if (ret != 0) {
 		return ret;
@@ -257,9 +281,10 @@ int hb_module_data_write(const struct device *dev,
 			 const struct hb_module_data *module_data)
 {
 	struct hb_data *data = dev->data;
+	const struct hb_config *config = dev->config;
 	uint8_t bytes[HB_MODULE_DATA_SIZE];
-	uint16_t word;
-	int ret = 0;
+	uint8_t readback[HB_MODULE_DATA_SIZE];
+	int ret;
 
 	if (module_data == NULL ||
 	    module_data->version != HB_MODULE_DATA_VERSION ||
@@ -280,37 +305,19 @@ int hb_module_data_write(const struct device *dev,
 	bytes[7] = module_data->flags;
 
 	k_mutex_lock(&data->lock, K_FOREVER);
-	/* Write low-side data first and the high-side version word last. */
-	for (size_t side_index = 0; side_index < 2U && ret == 0;
-	     ++side_index) {
-		size_t side = side_index == 0U ? HB_LOW_SIDE : HB_HIGH_SIDE;
-
-		for (size_t slot_index = 0; slot_index < 2U && ret == 0;
-		     ++slot_index) {
-			size_t slot = slot_index == 0U ? 1U : 0U;
-			uint8_t word_index = slot == 0U ? 1U : 3U;
-			size_t offset = side * 4U + slot * 2U;
-
-			word = (uint16_t)bytes[offset] |
-			       ((uint16_t)bytes[offset + 1U] << 8);
-			ret = eeprom_write(hb_eeprom_device(dev, (enum hb_side)side),
-				    (off_t)word_index * sizeof(word), &word,
-				    sizeof(word));
-			if (ret == 0) {
-				uint16_t readback;
-
-				ret = eeprom_read(
-					hb_eeprom_device(dev, (enum hb_side)side),
-					(off_t)word_index * sizeof(word), &readback,
-					sizeof(readback));
-				if (ret == 0 && readback != word) {
-					ret = -EIO;
-				}
-			}
+	ret = eeprom_read(config->eeprom, 0, readback, sizeof(readback));
+	if (ret == 0 && memcmp(bytes, readback, sizeof(bytes)) != 0) {
+		ret = eeprom_write(config->eeprom, 0, bytes, sizeof(bytes));
+		if (ret == 0) {
+			ret = eeprom_read(config->eeprom, 0, readback,
+					  sizeof(readback));
 		}
 	}
 	k_mutex_unlock(&data->lock);
-	return ret;
+	if (ret != 0) {
+		return ret;
+	}
+	return memcmp(bytes, readback, sizeof(bytes)) == 0 ? 0 : -EIO;
 }
 
 #define HB_DEFINE(inst)                                                       \
@@ -319,10 +326,7 @@ int hb_module_data_write(const struct device *dev,
 			DEVICE_DT_GET(DT_INST_PHANDLE(inst, high_side_sensor)),       \
 			DEVICE_DT_GET(DT_INST_PHANDLE(inst, low_side_sensor)),        \
 		},                                                                  \
-		.eeproms = {                                                       \
-			DEVICE_DT_GET(DT_INST_PHANDLE(inst, high_side_eeprom)),       \
-			DEVICE_DT_GET(DT_INST_PHANDLE(inst, low_side_eeprom)),        \
-		},                                                                  \
+		.eeprom = DEVICE_DT_GET(DT_INST_PHANDLE(inst, eeprom)),            \
 		.alerts = {                                                        \
 			GPIO_DT_SPEC_INST_GET_BY_IDX(inst, alert_gpios, 0),            \
 			GPIO_DT_SPEC_INST_GET_BY_IDX(inst, alert_gpios, 1),            \

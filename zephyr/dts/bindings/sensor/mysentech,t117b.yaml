@@ -1,0 +1,5 @@
+description: Mysentech T117B I2C temperature sensor
+
+compatible: "mysentech,t117b"
+
+include: i2c-device.yaml

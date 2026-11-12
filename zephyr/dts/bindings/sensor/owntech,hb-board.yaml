@@ -6,24 +6,19 @@ properties:
   high-side-sensor:
     type: phandle
     required: true
-    description: TMP117 monitoring the high-side switch.
+    description: T117B monitoring the high-side switch.
 
   low-side-sensor:
     type: phandle
     required: true
-    description: TMP117 monitoring the low-side switch.
+    description: T117B monitoring the low-side switch.
 
-  high-side-eeprom:
+  eeprom:
     type: phandle
     required: true
-    description: EEPROM child of the high-side TMP117.
-
-  low-side-eeprom:
-    type: phandle
-    required: true
-    description: EEPROM child of the low-side TMP117.
+    description: 24C02S EEPROM shared by the HB module.
 
   alert-gpios:
     type: phandle-array
     required: true
-    description: High-side then low-side active-low TMP117 ALERT inputs.
+    description: High-side then low-side active-low T117B ALERT inputs.

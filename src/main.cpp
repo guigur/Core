@@ -5,6 +5,7 @@
 #include <string.h>
 #include <zephyr/console/console.h>
 #include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/drivers/eeprom.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/kernel.h>
@@ -16,9 +17,14 @@
 #include <pebb_afe.h>
 #include <pebb_hb.h>
 
+#define ANSI_WHITE "\x1b[37m"
+#define ANSI_GREEN "\x1b[32m"
+#define ANSI_RED "\x1b[31m"
+#define ANSI_RESET "\x1b[0m"
+
 static const char *const afe_names[PEBB_AFE_COUNT] = {
     "V_HIGH", "V1_LOW", "V2_LOW", "V3_LOW", "I_HIGH",
-    "I1_LOW", "I2_LOW", "I3_LOW", "SIN", "COS"
+    "I1_LOW", "I2_LOW", "I3_LOW", "ANALOG1", "ANALOG2"
 };
 
 /* KiCad J822-J831: slot order differs from the logical AFE enum. */
@@ -29,13 +35,37 @@ static const uint8_t afe_address_indices[PEBB_AFE_COUNT] = {
     1, 0, 4, 1, 4, 2, 0, 3, 2, 3
 };
 static const char *const afe_ch0_slots[8] = {
-    "I2_LOW", "V3_LOW", "SIN", "I3_LOW", "V2_LOW",
+    "I2_LOW", "V3_LOW", "ANALOG1", "I3_LOW", "V2_LOW",
     "unexpected", "unexpected", "unexpected"
 };
 static const char *const afe_ch1_slots[8] = {
-    "V1_LOW", "V_HIGH", "I1_LOW", "COS", "I_HIGH",
+    "V1_LOW", "V_HIGH", "I1_LOW", "ANALOG2", "I_HIGH",
     "unexpected", "unexpected", "U839"
 };
+
+static const struct i2c_dt_spec pebb_root_mux_i2c =
+    I2C_DT_SPEC_GET(DT_NODELABEL(pebb_i2c_mux));
+
+static void recover_i2c(void)
+{
+    const struct device *bus = pebb_root_mux_i2c.bus;
+    if (!device_is_ready(bus)) {
+        printk("I2C1 controller: NOT READY\n");
+        return;
+    }
+    printk("Recovering I2C1 on PA15/PB7...\n");
+    int ret = i2c_recover_bus(bus);
+    printk("I2C1 recovery: %s (%d)\n", ret == 0 ? "OK" : "FAIL", ret);
+    if (ret == 0) {
+        uint8_t mask = 0;
+        ret = i2c_read_dt(&pebb_root_mux_i2c, &mask, sizeof(mask));
+        printk("U805 0x70 after recovery: %s (%d)",
+               ret == 0 ? "ACK" : "NO", ret);
+        if (ret == 0) printk("; selected mask=0x%02x", mask);
+        printk("\n");
+    }
+    printk("Zephyr devices that failed boot initialization remain NOT READY.\n");
+}
 
 static int result(const char *name, int ret)
 {
@@ -52,6 +82,31 @@ static bool parse(const char *s, unsigned long max, unsigned long *out)
     return errno == 0 && *end == '\0' && *out <= max;
 }
 
+static bool dac_readback_plausible(const uint8_t raw[24], uint8_t address)
+{
+    for (unsigned int ch = 0; ch < 4; ++ch) {
+        uint8_t ram = raw[6 * ch];
+        uint8_t eeprom = raw[6 * ch + 3];
+        if ((ram & 0x80) == 0 || ((ram >> 4) & 3) != ch ||
+            ((eeprom >> 4) & 3) != ch ||
+            (ram & 7) != (address & 7) ||
+            (eeprom & 7) != (address & 7)) return false;
+    }
+    return true;
+}
+
+static const char *probe_status(int ret)
+{
+    if (ret == 0) return "ACK";
+    if (ret == -EIO || ret == -ENXIO) return "NO";
+    return "ERROR";
+}
+
+static const char *status_color(bool ok)
+{
+    return ok ? ANSI_GREEN : ANSI_RED;
+}
+
 /* Probe components independently, even when an AFE device failed init. */
 static void scan_afe_bus(pebb_i2c_bus_id bus_id, const char *name, bool dac_only)
 {
@@ -64,7 +119,7 @@ static void scan_afe_bus(pebb_i2c_bus_id bus_id, const char *name, bool dac_only
 
     printk("\n%s - %s addresses:\n", name, dac_only ? "MCP4728" : "TCA9555");
     if (!device_is_ready(bus)) {
-        printk("  bus not ready\n");
+        printk("  " ANSI_RED "bus not ready" ANSI_WHITE "\n");
         return;
     }
     for (uint8_t index = 0; index < 8; ++index) {
@@ -74,44 +129,39 @@ static void scan_afe_bus(pebb_i2c_bus_id bus_id, const char *name, bool dac_only
         if (ret != 0) {
             if (ret != -EIO && ret != -ENXIO) {
                 ++bus_errors;
-                printk("  0x%02x: I2C error %d\n", addr, ret);
+                printk("  0x%02x: " ANSI_RED "I2C error %d" ANSI_WHITE "\n",
+                       addr, ret);
             }
             continue;
         }
         ++found;
         if (dac_only) {
-            bool plausible = true;
-            for (unsigned int ch = 0; ch < 4; ++ch) {
-                uint8_t ram = dac[6 * ch];
-                uint8_t eeprom = dac[6 * ch + 3];
-                if ((ram & 0x80) == 0 || ((ram >> 4) & 3) != ch ||
-                    ((eeprom >> 4) & 3) != ch ||
-                    (ram & 7) != (addr & 7) ||
-                    (eeprom & 7) != (addr & 7))
-                    plausible = false;
-            }
-            printk("  0x%02x: ACK; readback %s; first bytes %02x %02x %02x\n",
-                   addr, plausible ? "plausible" : "invalid (collision possible)",
+            bool plausible = dac_readback_plausible(dac, addr);
+            printk("  0x%02x: " ANSI_GREEN "ACK" ANSI_WHITE "; readback %s%s" ANSI_WHITE "; first bytes %02x %02x %02x\n",
+                   addr, status_color(plausible),
+                   plausible ? "plausible" : "invalid (collision possible)",
                    dac[0], dac[1], dac[2]);
         } else {
-            const char *slot = bus_id == PEBB_I2C_AFE_MAIN ?
+            const char *slot = bus_id == PEBB_I2C_AFE_CH0 ?
                 afe_ch0_slots[index] : afe_ch1_slots[index];
-            printk("  0x%02x: ACK; reg6=%02x %02x; expected %s\n",
+            printk("  0x%02x: " ANSI_GREEN "ACK" ANSI_WHITE "; reg6=%02x %02x; expected %s\n",
                    addr, gpio[0], gpio[1], slot);
         }
     }
-    if (found == 0) printk("  No response in this address range.\n");
-    printk("  Summary: %u responding address(es), %u bus error(s).\n",
-           found, bus_errors);
+    if (found == 0)
+        printk("  " ANSI_RED "No response in this address range." ANSI_WHITE "\n");
+    printk("  Summary: %s%u" ANSI_WHITE " responding address(es), %s%u" ANSI_WHITE " bus error(s).\n",
+           status_color(found != 0), found, status_color(bus_errors == 0), bus_errors);
 }
 
 static void scan_afe_buses(bool dac_only)
 {
-    printk("\n=== %s PHYSICAL ADDRESS SCAN ===\n",
+    printk(ANSI_WHITE "\n=== %s PHYSICAL ADDRESS SCAN ===\n",
            dac_only ? "DAC" : "GPIO");
-    scan_afe_bus(PEBB_I2C_AFE_MAIN, "U805 channel 0 (five AFEs)", dac_only);
-    scan_afe_bus(PEBB_I2C_AFE_SINCOS, "U805 channel 1 (five AFEs + U839)", dac_only);
+    scan_afe_bus(PEBB_I2C_AFE_CH0, "U805 channel 0 (five AFEs)", dac_only);
+    scan_afe_bus(PEBB_I2C_AFE_CH1, "U805 channel 1 (five AFEs + U839)", dac_only);
     printk("ACK confirms an address, not a unique chip or its physical slot.\n");
+    printk(ANSI_RESET);
 }
 
 static int scan(void)
@@ -121,8 +171,9 @@ static int scan(void)
     unsigned int bus_ready = 0;
     unsigned int hb_ready = 0;
 
-    printk("\n=== ZEPHYR DEVICE STATUS ===\n");
-    printk("PEBB board driver: %s\n", pebb_is_ready() ? "READY" : "NOT READY");
+    printk(ANSI_WHITE "\n=== ZEPHYR DEVICE STATUS ===\n");
+    printk("PEBB board driver: %s%s" ANSI_WHITE "\n",
+           status_color(pebb_is_ready()), pebb_is_ready() ? "READY" : "NOT READY");
     errors += !pebb_is_ready();
     for (unsigned int i = 0; i < PEBB_MUX_COUNT; ++i) {
         bool ok = device_is_ready(pebb_mux_get((pebb_mux_id)i));
@@ -134,18 +185,40 @@ static int scan(void)
         bus_ready += ok;
         errors += !ok;
     }
-    printk("I2C mux drivers: %u/%u ready; logical buses: %u/%u ready\n",
-           mux_ready, PEBB_MUX_COUNT, bus_ready, PEBB_I2C_BUS_COUNT);
-    printk("PEBB I/O expanders: U838 alerts %s; U839 controls %s\n",
-           device_is_ready(pebb_alert_gpio_get()) ? "READY" : "NOT READY",
-           device_is_ready(pebb_control_gpio_get()) ? "READY" : "NOT READY");
-    printk("AFE driver initialization (logical name, expected GPIO/DAC):\n");
+    printk("I2C mux drivers: %s%u/%u ready" ANSI_WHITE "; logical buses: %s%u/%u ready" ANSI_WHITE "\n",
+           status_color(mux_ready == PEBB_MUX_COUNT), mux_ready, PEBB_MUX_COUNT,
+           status_color(bus_ready == PEBB_I2C_BUS_COUNT), bus_ready, PEBB_I2C_BUS_COUNT);
+    bool u838_ready = device_is_ready(pebb_alert_gpio_get());
+    bool u839_ready = device_is_ready(pebb_control_gpio_get());
+    printk("PEBB I/O expanders: U838 alerts %s%s" ANSI_WHITE "; U839 controls %s%s" ANSI_WHITE "\n",
+           status_color(u838_ready), u838_ready ? "READY" : "NOT READY",
+           status_color(u839_ready), u839_ready ? "READY" : "NOT READY");
+    printk("ID AFE slot bus GPIO             DAC              driver\n");
     for (unsigned int i = 0; i < PEBB_AFE_COUNT; ++i) {
         bool ok = device_is_ready(pebb_afe_get((pebb_afe_id)i));
         unsigned int address_index = afe_address_indices[i];
-        printk("  %-7s ch%u 0x%02x/0x%02x: %s\n", afe_names[i],
-               afe_mux_channels[i], 0x20 + address_index,
-               0x60 + address_index, ok ? "READY" : "NOT READY");
+        uint8_t gpio_address = 0x20 + address_index;
+        uint8_t dac_address = 0x60 + address_index;
+        const struct device *bus = pebb_i2c_bus_get(afe_mux_channels[i] == 0 ?
+            PEBB_I2C_AFE_CH0 : PEBB_I2C_AFE_CH1);
+        uint8_t reg = 0x06;
+        uint8_t gpio[2];
+        uint8_t dac[24];
+        int gpio_ret = -ENODEV;
+        int dac_ret = -ENODEV;
+        if (device_is_ready(bus)) {
+            gpio_ret = i2c_write_read(bus, gpio_address, &reg, 1,
+                                      gpio, sizeof(gpio));
+            dac_ret = i2c_read(bus, dac, sizeof(dac), dac_address);
+        }
+        bool dac_valid = dac_ret == 0 && dac_readback_plausible(dac, dac_address);
+        const char *dac_state = dac_ret == 0 && !dac_valid ?
+            "ACK_BAD" : probe_status(dac_ret);
+        printk("%2u %-7s ch%u 0x%02x %s%-7s" ANSI_WHITE " 0x%02x %s%-8s" ANSI_WHITE " %s%s" ANSI_WHITE "\n",
+               i, afe_names[i], afe_mux_channels[i], gpio_address,
+               status_color(gpio_ret == 0), probe_status(gpio_ret),
+               dac_address, status_color(dac_valid),
+               dac_state, status_color(ok), ok ? "READY" : "NOT READY");
         errors += !ok;
     }
     for (unsigned int i = 0; i < PEBB_HB_COUNT; ++i) {
@@ -154,9 +227,11 @@ static int scan(void)
         errors += !ok;
     }
     bool ok = device_is_ready(pebb_feeder_get());
-    printk("HB drivers: %u/%u ready; feeder: %s\n", hb_ready,
-           PEBB_HB_COUNT, ok ? "READY" : "NOT READY");
-    printk("Driver status cannot prove which physical slot responded.\n");
+    printk("HB drivers: %s%u/%u ready" ANSI_WHITE "; feeder: %s%s" ANSI_WHITE "\n",
+           status_color(hb_ready == PEBB_HB_COUNT), hb_ready, PEBB_HB_COUNT,
+           status_color(ok), ok ? "READY" : "NOT READY");
+    printk("ACK marks an address response, not a physical slot; an unprovisioned DAC may appear in another row.\n");
+    printk("ACK_BAD means the DAC answered with implausible readback.\n");
     scan_afe_buses(false);
     return errors + !ok;
 }
@@ -210,6 +285,8 @@ static int check_hb(int id)
 {
     const struct device *dev = pebb_hb_get((pebb_hb_id)id);
     hb_module_data data;
+    char serial[HB_SERIAL_NUMBER_LENGTH + 1U];
+    char key[HB_PANEL_KEY_LENGTH + 1U];
     printk("HB %d\n", id);
     if (!device_is_ready(dev)) return result("ready", -ENODEV);
     int errors = 0;
@@ -219,7 +296,7 @@ static int check_hb(int id)
         errors += result(side ? "low temperature" : "high temperature", ret);
         if (!ret) printk("  %s: %d mC\n", side ? "low" : "high", mc);
         ret = hb_alert_is_active(dev, (hb_side)side);
-        if (ret < 0) errors += result("TMP117 alert", ret);
+        if (ret < 0) errors += result("T117B alert", ret);
         else printk("  %s alert=%d\n", side ? "low" : "high", ret);
     }
     int ret = hb_module_data_read(dev, &data);
@@ -227,15 +304,94 @@ static int check_hb(int id)
                      data.version, data.operating_hours, data.max_voltage_code,
                      data.max_current_code, data.flags);
     else if (ret == -EPROTONOSUPPORT) {
-        uint16_t raw_version_word;
-        int raw_ret = hb_eeprom_read_word(dev, HB_HIGH_SIDE, 1,
-                                          &raw_version_word);
-        if (raw_ret == 0 && (uint8_t)raw_version_word == 0xff)
+        uint8_t raw_version;
+        int raw_ret = eeprom_read(hb_eeprom_device(dev), 0,
+                                  &raw_version, sizeof(raw_version));
+        if (raw_ret == 0 && raw_version == 0xff)
             printk("  EEPROM is blank (version byte 0xff)\n");
         else errors += result("module EEPROM version", raw_ret ? raw_ret : ret);
     }
     else errors += result("module EEPROM", ret);
+    ret = hb_serial_number_read(dev, serial);
+    if (ret == 0) printk("  serial=%s\n", serial);
+    else if (ret == -ENODATA) printk("  serial: blank\n");
+    else errors += result("serial", ret);
+    ret = hb_panel_key_read(dev, key);
+    if (ret == 0) printk("  panel key: programmed\n");
+    else if (ret == -ENODATA) printk("  panel key: blank\n");
+    else errors += result("panel key", ret);
     return errors;
+}
+
+static void hb_diag(void)
+{
+    static const pebb_i2c_bus_id hb_buses[PEBB_HB_COUNT] = {
+        PEBB_I2C_HB_1, PEBB_I2C_HB_2, PEBB_I2C_HB_3
+    };
+    const struct device *power_bus = pebb_i2c_bus_get(PEBB_I2C_POWER);
+    uint8_t mux_mask = 0;
+    int ret;
+
+    printk(ANSI_WHITE "\n=== HB I2C DIAGNOSTIC ===\n");
+    printk("U805 ch4 -> U804 -> U814 0x71 -> ch2/ch3/ch4 -> HB1/HB2/HB3\n");
+    if (device_is_ready(power_bus)) {
+        ret = i2c_read(power_bus, &mux_mask, 1, 0x71);
+        printk("U814 0x71: %s%s" ANSI_WHITE " (%d)",
+               status_color(ret == 0), probe_status(ret), ret);
+        if (ret == 0) printk("; selected mask=0x%02x", mux_mask);
+        printk("\n");
+    } else {
+        printk("U805 ch4 logical bus: " ANSI_RED "NOT READY" ANSI_WHITE "\n");
+    }
+
+    for (unsigned int i = 0; i < PEBB_HB_COUNT; ++i) {
+        const struct device *bus = pebb_i2c_bus_get(hb_buses[i]);
+        const struct device *hb = pebb_hb_get((pebb_hb_id)i);
+        printk("HB%u (U814 ch%u): bus %s%s" ANSI_WHITE ", driver %s%s" ANSI_WHITE "\n",
+               i + 1, i + 2, status_color(device_is_ready(bus)),
+               device_is_ready(bus) ? "READY" : "NOT READY",
+               status_color(device_is_ready(hb)),
+               device_is_ready(hb) ? "READY" : "NOT READY");
+        if (!device_is_ready(bus)) continue;
+        for (uint8_t addr = 0x40; addr <= 0x43; ++addr) {
+            uint8_t id_reg = 0x18;
+            uint8_t id[2];
+            ret = i2c_write_read(bus, addr, &id_reg, 1, id, sizeof(id));
+            if (ret == 0) {
+                printk("  T117B address 0x%02x: " ANSI_GREEN "ACK" ANSI_WHITE
+                       "; ROM=%02x %02x%s\n", addr, id[0], id[1],
+                       id[0] == 0x01 && id[1] == 0x16 ? " (expected)" : " (unexpected)");
+            } else {
+                printk("  T117B address 0x%02x: " ANSI_RED "%s" ANSI_WHITE " (%d)\n",
+                       addr, probe_status(ret), ret);
+            }
+        }
+        uint8_t offset = 0;
+        uint8_t first_byte = 0;
+        ret = i2c_write_read(bus, 0x50, &offset, 1, &first_byte, 1);
+        printk("  24C02S EEPROM 0x50: %s%s" ANSI_WHITE " (%d)",
+               status_color(ret == 0), probe_status(ret), ret);
+        if (ret == 0) printk("; byte[0]=0x%02x", first_byte);
+        printk("\n");
+        if (device_is_ready(power_bus)) {
+            ret = i2c_read(power_bus, &mux_mask, 1, 0x71);
+            printk("  U814 selected mask: %s0x%02x" ANSI_WHITE
+                   " (expected 0x%02x; read ret=%d)\n",
+                   status_color(ret == 0 && mux_mask == (1U << (i + 2))),
+                   ret == 0 ? mux_mask : 0U, 1U << (i + 2), ret);
+        }
+        for (int side = HB_HIGH_SIDE; side <= HB_LOW_SIDE; ++side) {
+            bool sensor = device_is_ready(hb_sensor_device(hb, (hb_side)side));
+            printk("  %s (expected 0x%02x): sensor %s%s" ANSI_WHITE "\n",
+                   side == HB_HIGH_SIDE ? "HS" : "LS", 0x40 + side,
+                   status_color(sensor), sensor ? "READY" : "NOT READY");
+        }
+        bool eeprom = device_is_ready(hb_eeprom_device(hb));
+        printk("  shared EEPROM: %s%s" ANSI_WHITE "\n",
+               status_color(eeprom), eeprom ? "READY" : "NOT READY");
+    }
+    printk("A logical bus can be READY even when its physical devices do not respond.\n");
+    printk(ANSI_RESET);
 }
 
 static int check_feeder(void)
@@ -252,6 +408,73 @@ static int check_feeder(void)
                      data.voltage_valid, data.voltage_min_code,
                      data.voltage_max_code, data.flags);
     return result("feeder data", ret);
+}
+
+static void feeder_diag(void)
+{
+    const struct device *feeder_bus = pebb_i2c_bus_get(PEBB_I2C_FEEDER);
+    const struct device *power_bus = pebb_i2c_bus_get(PEBB_I2C_POWER);
+    const struct device *power_io_bus = pebb_i2c_bus_get(PEBB_I2C_POWER_IO);
+    const struct device *afe_bus_1 = pebb_i2c_bus_get(PEBB_I2C_AFE_CH1);
+    uint8_t offset = 0;
+    uint8_t bytes[4];
+    uint8_t mux_mask;
+    uint8_t config_reg = 0x06;
+    uint8_t gpio_config[2];
+    int ret;
+
+    printk("\n=== FEEDER I2C PATH ===\n");
+    if (!i2c_is_ready_dt(&pebb_root_mux_i2c)) {
+        printk("U805 root mux 0x70: parent I2C bus NOT READY\n");
+    } else {
+        ret = i2c_read_dt(&pebb_root_mux_i2c, &mux_mask, 1);
+        if (ret == 0)
+            printk("U805 root mux 0x70: ACK; selected mask=0x%02x\n", mux_mask);
+        else
+            printk("U805 root mux 0x70: %s (%d)\n", probe_status(ret), ret);
+    }
+    if (device_is_ready(afe_bus_1)) {
+        ret = i2c_write_read(afe_bus_1, 0x27, &config_reg, 1,
+                             gpio_config, sizeof(gpio_config));
+        printk("U839 onboard GPIO 0x27 via U805 ch1: %s (%d)\n",
+               probe_status(ret), ret);
+    }
+    printk("Feeder J101 SDA/SCL -> PEBB J811 -> U805 ch2 (DGND).\n");
+    if (!device_is_ready(feeder_bus)) {
+        printk("U805 ch2 logical bus: NOT READY\n");
+    } else {
+        ret = i2c_write_read(feeder_bus, 0x50, &offset, 1,
+                             bytes, sizeof(bytes));
+        if (ret == 0)
+            printk("Feeder EEPROM 0x50: ACK; bytes[0..3]=%02x %02x %02x %02x\n",
+                   bytes[0], bytes[1], bytes[2], bytes[3]);
+        else
+            printk("Feeder EEPROM 0x50: %s (%d)\n", probe_status(ret), ret);
+    }
+    if (i2c_is_ready_dt(&pebb_root_mux_i2c) &&
+        i2c_read_dt(&pebb_root_mux_i2c, &mux_mask, 1) == 0)
+        printk("U805 selected mask after feeder probe: 0x%02x (expected 0x04)\n",
+               mux_mask);
+
+    printk("U805 ch4 -> U804 isolator -> U814 (PGND), separate from feeder EEPROM.\n");
+    if (!device_is_ready(power_bus)) {
+        printk("U805 ch4 logical bus: NOT READY\n");
+    } else {
+        ret = i2c_read(power_bus, &mux_mask, 1, 0x71);
+        if (ret == 0)
+            printk("U814 mux 0x71: ACK; selected mask=0x%02x\n", mux_mask);
+        else
+            printk("U814 mux 0x71: %s (%d)\n", probe_status(ret), ret);
+    }
+    if (device_is_ready(power_io_bus)) {
+        for (uint8_t addr = 0x20; addr <= 0x21; ++addr) {
+            ret = i2c_write_read(power_io_bus, addr, &config_reg, 1,
+                                 gpio_config, sizeof(gpio_config));
+            printk("U%u GPIO 0x%02x: %s (%d)\n",
+                   addr == 0x20 ? 837U : 838U, addr, probe_status(ret), ret);
+        }
+    }
+    printk("Logical READY does not verify that U814 responded electrically.\n");
 }
 
 static int check_all(void)
@@ -313,14 +536,14 @@ static void exercise_all(void)
 
 static void help(void)
 {
-    printk("scan | dacscan | test all|pebb|feeder|afe ID|all|hb ID|all\n");
+    printk("scan | dacscan | feederdiag | hbdiag | i2crecover | test all|pebb|feeder|afe ID|all|hb ID|all\n");
     printk("exercise all | exercise afe ID|all (changes AFE controls)\n");
     printk("afe ID reset|gain N|bw N|inputs PLUS MINUS|enable GAIN BW|led 0|1|dac CH MV\n");
     printk("afe ID identify [HZ [DURATION_MS]] | afe ID stop\n");
     printk("afe ID provision CURRENT_DAC_ADDR (experimental EEPROM write; one AFE per branch)\n");
     printk("pebb term 0|1 | pebb scl 0|1 (PA15/PA13) | pebb fan ID ignore|critical | pebb ack\n");
     printk("feeder run 0|1 | feeder sample CODE | feeder flags VALUE | feeder flush\n");
-    printk("hb ID write HOURS VMAX IMAX FLAGS (writes both TMP117 EEPROMs)\n");
+    printk("hb ID write HOURS VMAX IMAX FLAGS (writes HB 24C02S EEPROM)\n");
     printk("IDs start at zero. HB write and feeder checkpoints use EEPROM.\n");
     printk("SCL=1 selects PA13, which requires matching MCU pin configuration.\n");
 }
@@ -337,6 +560,9 @@ static void command(char *line)
     if (!strcmp(a[0], "help")) { help(); return; }
     if (n == 1 && !strcmp(a[0], "scan")) { scan(); return; }
     if (n == 1 && !strcmp(a[0], "dacscan")) { scan_afe_buses(true); return; }
+    if (n == 1 && !strcmp(a[0], "feederdiag")) { feeder_diag(); return; }
+    if (n == 1 && !strcmp(a[0], "hbdiag")) { hb_diag(); return; }
+    if (n == 1 && !strcmp(a[0], "i2crecover")) { recover_i2c(); return; }
     if (n == 2 && !strcmp(a[0], "exercise") && !strcmp(a[1], "all")) {
         exercise_all(); return;
     }

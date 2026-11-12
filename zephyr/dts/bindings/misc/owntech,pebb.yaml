@@ -29,10 +29,10 @@ properties:
   feeder:
     type: phandle
     required: true
-  afe-main-bus:
+  afe-channel-0-bus:
     type: phandle
     required: true
-  afe-sincos-bus:
+  afe-channel-1-bus:
     type: phandle
     required: true
   power-bus:

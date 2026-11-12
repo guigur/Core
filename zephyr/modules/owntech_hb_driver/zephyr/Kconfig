@@ -2,10 +2,10 @@ config OWNTECH_HB_DRIVER
 	bool "OwnTech half-bridge monitoring driver"
 	default y if DT_HAS_OWNTECH_HB_BOARD_ENABLED
 	depends on DT_HAS_OWNTECH_HB_BOARD_ENABLED
-	depends on SENSOR && TMP116 && EEPROM && EEPROM_TMP116
+	depends on SENSOR && EEPROM && EEPROM_AT24
 	select GPIO
 	help
-	  Expose the two TMP117 temperature sensors, their integrated EEPROMs and
+	  Expose the two T117B temperature sensors, the 24C02S EEPROM and
 	  ALERT inputs as one device for each OwnTech half-bridge board.
 
 if OWNTECH_HB_DRIVER

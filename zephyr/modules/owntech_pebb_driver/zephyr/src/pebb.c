@@ -142,8 +142,8 @@ static int pebb_init(const struct device *dev)
 	static const struct pebb_config pebb_config_##inst = {                    \
 		.muxes = { PEBB_BUS(inst, root_i2c_mux),                         \
 			   PEBB_BUS(inst, power_i2c_mux) },                         \
-		.buses = { PEBB_BUS(inst, afe_main_bus),                         \
-			   PEBB_BUS(inst, afe_sincos_bus),                         \
+		.buses = { PEBB_BUS(inst, afe_channel_0_bus),                      \
+			   PEBB_BUS(inst, afe_channel_1_bus),                      \
 			   PEBB_BUS(inst, power_bus),                              \
 			   PEBB_BUS(inst, feeder_bus),                             \
 			   PEBB_BUS(inst, power_io_bus),                           \

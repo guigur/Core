@@ -11,8 +11,8 @@ extern "C" {
 
 /* Logical buses; the I2C mux drivers select the physical channels. */
 enum pebb_i2c_bus_id {
-	PEBB_I2C_AFE_MAIN,
-	PEBB_I2C_AFE_SINCOS,
+	PEBB_I2C_AFE_CH0,
+	PEBB_I2C_AFE_CH1,
 	PEBB_I2C_POWER,
 	PEBB_I2C_FEEDER,
 	PEBB_I2C_POWER_IO,
@@ -20,6 +20,9 @@ enum pebb_i2c_bus_id {
 	PEBB_I2C_HB_2,
 	PEBB_I2C_HB_3,
 	PEBB_I2C_BUS_COUNT,
+	/* Source compatibility with the former channel names. */
+	PEBB_I2C_AFE_MAIN = PEBB_I2C_AFE_CH0,
+	PEBB_I2C_AFE_SINCOS = PEBB_I2C_AFE_CH1,
 };
 
 enum pebb_mux_id {

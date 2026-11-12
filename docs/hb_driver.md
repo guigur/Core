@@ -1,97 +1,73 @@
 # PEBB half-bridge temperature and EEPROM driver
 
-The PEBB shield configures the monitoring devices fitted to the three OwnTech
-half-bridge boards. Each HB has two TMP117 temperature sensors. Their four-word
-integrated EEPROMs are exposed as normal Zephyr EEPROM devices and through a
-small OwnTech API.
+The current HB_board schematic has two Mysentech T117B temperature sensors
+(U815 high side and U811 low side) and one XBLW 24C02S EEPROM (U803).
+The T117B is not register-compatible with the older TMP117.
 
-## Hardware topology
+## I2C path
 
-The power-domain I2C tree is reached through U805 channel 4 and the U804
-isolator. U814 is a second TCA9548A at address `0x71`. Zephyr 4.0 initializes
-all standard TCA9548A roots with one global priority, which is too early for a
-multiplexer behind another mux channel. The `owntech,tca9548a-nested` driver
-therefore initializes U814 after the U805 channel and before its own channels.
-The nested mux driver and `pebb_hb_get()` are part of the PEBB module; the HB
-driver handles individual half-bridge boards.
+MCU I2C1 reaches U805 at `0x70`, channel 4; then the U804 isolator reaches
+U814 at `0x71`. U814 channels 2, 3 and 4 reach HB1, HB2 and HB3. The three
+branches are electrically separate and can reuse the same addresses.
 
-| Board | U814 channel | HS TMP117 | LS TMP117 | U838 ALERT pins HS/LS |
-| --- | ---: | ---: | ---: | ---: |
-| HB1 | 2 | `0x48` | `0x49` | 1 / 0 |
-| HB2 | 3 | `0x48` | `0x49` | 3 / 2 |
-| HB3 | 4 | `0x48` | `0x49` | 5 / 4 |
+| HB | PEBB connector | U814 channel | High side | Low side | EEPROM |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 | U829 | 2 | T117B `0x40` | T117B `0x41` | 24C02S `0x50` |
+| 2 | U830 | 3 | T117B `0x40` | T117B `0x41` | 24C02S `0x50` |
+| 3 | U831 | 4 | T117B `0x40` | T117B `0x41` | 24C02S `0x50` |
 
-U838 is a TCA9555-compatible GPIO expander at `0x21` on U814 channel 1. Its
-interrupt output is not connected on the PEBB, so ALERT state is polled.
+On the HB board, connector J827 supplies +5V_PGND and PGND, SCL/SDA, the
+sensor ADDR pins and ALERT pins. PEBB straps high side ADDR low and low side
+ADDR high. U838 monitors the high/low ALERT pins as pairs 1/0, 3/2 and 5/4.
+The selected U814 channel can be checked with the bench `hbdiag` command;
+logical bus READY alone does not prove a physical response.
 
-## Application API
+J827 pin 7 is SCL (TP816), pin 8 is SDA (TP815), pin 2 is PGND (TP819),
+and pin 1 is +5V_PGND. U803's write-protect input is tied to PGND.
+The full connector and memory diagrams are in the internal wiki's
+`Shields/PEBB/half-bridge-eeprom.md` page.
 
-Use `pebb_hb_get()` to select one of the three boards and the `hb_*` functions
-to select its high-side or low-side device:
+## Temperature API
 
-```c
-#include <errno.h>
-#include <hb.h>
-#include <pebb_hb.h>
+`pebb_hb_get(PEBB_HB_1)` selects a board. `hb_temperature_get()` and
+`hb_temperature_get_millicelsius()` select `HB_HIGH_SIDE` or `HB_LOW_SIDE`.
+`hb_sensor_device()` exposes the native Zephyr sensor device. The T117B driver
+checks ROM bytes `01 16` at registers `0x18`–`0x19`, starts continuous
+conversion by writing register `0x04`, and reads temperature from `0x00`–`0x01`.
+The signed little-endian code is relative to 25°C with a scale of 1/256°C.
+`hb_alert_is_active()` reads the corresponding active-low ALERT input.
 
-int read_hb1(int32_t *high_mc, int32_t *low_mc)
-{
-	const struct device *hb = pebb_hb_get(PEBB_HB_1);
-	int ret;
+## External EEPROM map
 
-	if (!device_is_ready(hb)) {
-		return -ENODEV;
-	}
+`hb_eeprom_device(hb)` returns the board's native 256-byte Zephyr EEPROM.
+The operating record occupies `0x00`–`0x07`. A 13-character serial number and
+10-character panel key occupy separate 16-byte pages. Text is printable ASCII
+without a stored NUL terminator.
 
-	ret = hb_temperature_get_millicelsius(hb, HB_HIGH_SIDE, high_mc);
-	if (ret == 0) {
-		ret = hb_temperature_get_millicelsius(hb, HB_LOW_SIDE, low_mc);
-	}
-	return ret;
-}
-```
-
-The underlying TMP117 driver can return `-EBUSY` if a conversion is not ready;
-retry on a later control cycle rather than busy-waiting.
-
-`hb_alert_is_active()` returns 1 when the selected active-low ALERT signal is
-asserted. The native sensor and EEPROM devices remain available through
-`hb_sensor_device()` and `hb_eeprom_device()` for standard Zephyr APIs.
-
-## TMP117 EEPROM
-
-Use `hb_eeprom_read_word()` and `hb_eeprom_write_word()` for aligned 16-bit
-access. Word indices 0, 1 and 3 correspond to user EEPROM1, EEPROM2 and
-EEPROM4. Word index 2 is the TMP117 temperature-offset register; the wrapper
-rejects access to it with `-EACCES` so calibration cannot be overwritten by a
-generic metadata write.
-
-```c
-uint16_t board_code;
-const struct device *hb = pebb_hb_get(PEBB_HB_2);
-
-/* Read user EEPROM1 from the HB2 high-side TMP117. */
-int ret = hb_eeprom_read_word(hb, HB_HIGH_SIDE, 0, &board_code);
-```
-
-EEPROM writes are unlocked, performed and read back for verification. They
-must only be used for persistent configuration or identification data, never
-as periodic logging storage. The driver performs no EEPROM write at startup.
-
-## Module operating record, version 1
-
-The two TMP117s store one 8-byte record. The high-side sensor contains byte 0
-(version `HB_MODULE_DATA_VERSION`, currently 1) and bytes 1–3 (24-bit operating
-hours, little-endian). The low-side sensor contains bytes 4–7: 12-bit maximum
-voltage, 12-bit maximum current and 8-bit flags. Byte 5 packs voltage bits
-11–8 in its low nibble and current bits 3–0 in its high nibble. There is no
-reserved record byte.
+| Offset | Content |
+| ---: | --- |
+| `0x00` | Version, currently 1 |
+| `0x01`–`0x03` | Operating hours, unsigned 24-bit little-endian |
+| `0x04`–`0x05` low nibble | Maximum voltage, unsigned 12-bit |
+| `0x05` high nibble–`0x06` | Maximum current, unsigned 12-bit |
+| `0x07` | Flags (bit 0 fault, bit 1 warning) |
+| `0x08`–`0x0F` | Unallocated; preserved |
+| `0x10`–`0x1C` | Serial number, 13 ASCII bytes |
+| `0x1D`–`0x1F` | Unallocated; preserved |
+| `0x20`–`0x29` | Panel key, 10 ASCII bytes |
+| `0x2A`–`0xFF` | Unallocated; preserved |
 
 `hb_module_data_read()` rejects an unknown version with `-EPROTONOSUPPORT`.
-Set `.version = HB_MODULE_DATA_VERSION` before calling
-`hb_module_data_write()`. The writer verifies each EEPROM word and writes the
-high-side word containing the version last. An older unversioned record must
-be migrated using its known old contents; its first hour byte can
-coincidentally equal the new version, so version alone cannot reliably detect
-the old layout. See the internal wiki's half-bridge EEPROM map for the full
-byte table.
+`hb_module_data_write()` writes and verifies those eight bytes, leaving the
+rest of the EEPROM untouched. The application must limit write frequency to
+respect EEPROM endurance; this driver performs no write at startup.
+Records stored in the older TMP117 EEPROM layout are not available on the
+new board and require explicit migration if their contents matter.
+
+`hb_serial_number_read/write()` and `hb_panel_key_read/write()` access only
+their respective fields. Reads return `-ENODATA` for an erased field and
+`-EILSEQ` for invalid ASCII. Writes require the exact character count,
+skip an unchanged value, and verify the readback. Callers provide a read
+buffer of 14 or 11 bytes respectively, including the added NUL terminator.
+The key is stored as plaintext in the physical EEPROM; applications should
+avoid printing it in diagnostics. There is no automatic identity write.
