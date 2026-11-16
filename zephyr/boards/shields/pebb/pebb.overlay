@@ -96,32 +96,57 @@
 
 			afe_i2_low: afe@20 {
 				compatible = "owntech,afe-v3";
+				zephyr,deferred-init;
+				auto-provision;
 				reg = <0x20>;
 				dac-address = <0x60>;
+				ldac-pulse-gpios = <&spin_header 6 GPIO_ACTIVE_HIGH>;
+				provision-scl-gpios = <&gpioa 15 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+				provision-sda-gpios = <&gpiob 7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 			};
 
 			afe_v3_low: afe@21 {
 				compatible = "owntech,afe-v3";
+				zephyr,deferred-init;
+				auto-provision;
 				reg = <0x21>;
 				dac-address = <0x61>;
+				ldac-pulse-gpios = <&spin_header 6 GPIO_ACTIVE_HIGH>;
+				provision-scl-gpios = <&gpioa 15 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+				provision-sda-gpios = <&gpiob 7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 			};
 
 			afe_analog_1: afe@22 {
 				compatible = "owntech,afe-v3";
+				zephyr,deferred-init;
+				auto-provision;
 				reg = <0x22>;
 				dac-address = <0x62>;
+				ldac-pulse-gpios = <&spin_header 6 GPIO_ACTIVE_HIGH>;
+				provision-scl-gpios = <&gpioa 15 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+				provision-sda-gpios = <&gpiob 7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 			};
 
 			afe_i3_low: afe@23 {
 				compatible = "owntech,afe-v3";
+				zephyr,deferred-init;
+				auto-provision;
 				reg = <0x23>;
 				dac-address = <0x63>;
+				ldac-pulse-gpios = <&spin_header 6 GPIO_ACTIVE_HIGH>;
+				provision-scl-gpios = <&gpioa 15 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+				provision-sda-gpios = <&gpiob 7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 			};
 
 			afe_v2_low: afe@24 {
 				compatible = "owntech,afe-v3";
+				zephyr,deferred-init;
+				auto-provision;
 				reg = <0x24>;
 				dac-address = <0x64>;
+				ldac-pulse-gpios = <&spin_header 6 GPIO_ACTIVE_HIGH>;
+				provision-scl-gpios = <&gpioa 15 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+				provision-sda-gpios = <&gpiob 7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 			};
 		};
 
@@ -134,32 +159,57 @@
 
 			afe_v1_low: afe@20 {
 				compatible = "owntech,afe-v3";
+				zephyr,deferred-init;
+				auto-provision;
 				reg = <0x20>;
 				dac-address = <0x60>;
+				ldac-pulse-gpios = <&spin_header 6 GPIO_ACTIVE_HIGH>;
+				provision-scl-gpios = <&gpioa 15 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+				provision-sda-gpios = <&gpiob 7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 			};
 
 			afe_v_high: afe@21 {
 				compatible = "owntech,afe-v3";
+				zephyr,deferred-init;
+				auto-provision;
 				reg = <0x21>;
 				dac-address = <0x61>;
+				ldac-pulse-gpios = <&spin_header 6 GPIO_ACTIVE_HIGH>;
+				provision-scl-gpios = <&gpioa 15 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+				provision-sda-gpios = <&gpiob 7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 			};
 
 			afe_i1_low: afe@22 {
 				compatible = "owntech,afe-v3";
+				zephyr,deferred-init;
+				auto-provision;
 				reg = <0x22>;
 				dac-address = <0x62>;
+				ldac-pulse-gpios = <&spin_header 6 GPIO_ACTIVE_HIGH>;
+				provision-scl-gpios = <&gpioa 15 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+				provision-sda-gpios = <&gpiob 7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 			};
 
 			afe_analog_2: afe@23 {
 				compatible = "owntech,afe-v3";
+				zephyr,deferred-init;
+				auto-provision;
 				reg = <0x23>;
 				dac-address = <0x63>;
+				ldac-pulse-gpios = <&spin_header 6 GPIO_ACTIVE_HIGH>;
+				provision-scl-gpios = <&gpioa 15 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+				provision-sda-gpios = <&gpiob 7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 			};
 
 			afe_i_high: afe@24 {
 				compatible = "owntech,afe-v3";
+				zephyr,deferred-init;
+				auto-provision;
 				reg = <0x24>;
 				dac-address = <0x64>;
+				ldac-pulse-gpios = <&spin_header 6 GPIO_ACTIVE_HIGH>;
+				provision-scl-gpios = <&gpioa 15 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+				provision-sda-gpios = <&gpiob 7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
 			};
 
 			/* U839: A2=A1=A0=1. Controls TERM120 and U726 I2C_SEL. */

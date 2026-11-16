@@ -13,7 +13,8 @@ IDs: AFEs 0–9 follow `pebb_afe_id`, and HB modules 0–2 follow `pebb_hb_id`.
 | `feederdiag` | Read-only probe of feeder EEPROM `0x50` on U805 channel 2, U814 `0x71` across U804, and U837/U838 behind U814 |
 | `hbdiag` | Read-only T117B ROM probes at `0x40`–`0x43` and 24C02S `0x50` on U814 channels 2–4, with the selected mux mask and driver readiness |
 | `i2crecover` | Pulse I2C1 SCL on PA15/PB7 using Zephyr's STM32 bus recovery, then probe root mux U805 at `0x70` |
-| `afe 2 provision 0x60` | Experimental MCP4728 EEPROM address attempt for V2_LOW, from `0x60` to configured `0x64`; requires V2_LOW alone on U805 channel 0 |
+| `afe 2 provision` | Detect V2_LOW DAC's existing address through LDAC selection and program its configured address `0x64` only if needed |
+| `afe 2 provision 0x60` | Manual override: require the detected V2_LOW address to be `0x60` before programming `0x64` |
 | `test all` | Read-only checks of PEBB controls/fan status, every AFE GPIO/DAC, every HB temperature/alert/module record, and feeder EEPROM/data |
 | `test pebb`, `test feeder` | Read-only checks of one subsystem |
 | `test afe 0`, `test afe all` | Read one or all AFE GPIO registers, DAC RAM/EEPROM and INT status |
@@ -112,21 +113,27 @@ LDAC over the **same I²C wires** as the DAC. A normal TCA9555 output write
 cannot occur in the middle of an active MCP4728 I²C command, so the expander
 alone cannot generate the required edge. The MCP4728 `RDY/BSY` signal reaches
 TCA9555 input P0.7 and TP17; it reports EEPROM activity, but cannot trigger
-the address command. The AFE schematic exposes LDAC at TP18. A commissioning
-fixture can drive TP18 directly from an MCU GPIO while sending a bit-timed
-MCP4728 command, with the TCA9555 P0.6 configured as input to avoid contention.
-Do this with one unassigned DAC at a time, then verify its new address before
-fitting another board on the same I²C branch.
+the address command. On the modified AFE hardware, the direct P0.6-to-LDAC
+connection is cut. P0.6 selects the AFE's BSS138, while SPIN pin 6 (PB15)
+drives the shared gate line. Each DAC LDAC and each P0.6 selection node needs
+its own 5 V pull-up.
 
-For diagnostics, `afe ID provision CURRENT_DAC_ADDR` makes one experimental
-address-write attempt and checks both the old and configured new address. It
-works even when the AFE driver is `NOT READY`. Disconnect other AFEs from the
-same U805 channel first: multiple DACs can share the source address and a
-readback cannot prove uniqueness. The TCA9555 can pulse LDAC only **before**
-the DAC transaction, so this attempt does not meet the MCP4728 timing rule
-and is expected to fail on a conforming chip. A reported success requires the
-new address to respond and the old address to stop responding; power-cycle
-after success. The command does not claim success from an ACK alone.
+After the normal bus devices initialize, the deferred AFE driver checks each
+responding expander, selects its DAC through LDAC, discovers its address and
+writes EEPROM only if the address differs from the configured address. It
+then initializes that AFE. Missing slots are skipped. `afe ID provision`
+repeats the discovery and conditional write manually even if that driver
+is `NOT READY`; `afe ID provision CURRENT_DAC_ADDR` requires the detected
+address to match the supplied value. PA15/PB7 are bit-banged for the read and
+write, with a PB15 edge after the 8th SCL pulse of byte 2. The STM32 I²C
+controller is recovered after the pins return to I²C mode. The configured
+new address must be unused on that U805 channel. Other DACs may stay at the
+old address. If a driver failed at boot, power-cycle after a successful
+manual command so Zephyr retries initialization. Run the manual command only
+while no other I²C transfers are active.
+
+Set `gpio-layout = "v3-1"` in the slot's PEBB overlay when a v3.1 AFE is
+installed. The default `v3-0` layout is for v3.0 boards with the LDAC bodge.
 
 Manual control examples:
 

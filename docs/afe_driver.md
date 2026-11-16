@@ -103,20 +103,45 @@ logic high for a 5 V TCA9555. Strap A0/A1/A2 when possible; otherwise use
 5 V tolerant open-drain MCU pins with external pull-ups to 5 V, or a level
 translator. Apply the same voltage-domain checks to SCL, SDA and `~INT`.
 
-The MCP4728 address is independent. It is stored in MCP4728 EEPROM and is only
-declared with `dac-address`; this driver deliberately never changes it and never
-writes any DAC EEPROM value.
+The MCP4728 address is independent and stored in its EEPROM. Ordinary DAC
+setters only change RAM. Address provisioning is the operation that writes
+the DAC address to EEPROM.
 
-On the AFE v3 PCB, TCA9555 P0.6 drives the MCP4728 LDAC input and P0.7 reads
-RDY/BSY. The LDAC pulse used by `afe_latch()` updates DAC outputs after an
-ordinary register write. It cannot select a DAC for EEPROM address programming:
-the MCP4728 requires LDAC to fall during the low part of bit 8 of the second
-byte of its *active* address-write transaction. The TCA9555 shares the same
-SCL/SDA wires, so its output cannot be changed by a separate I²C transaction
-at that instant. RDY/BSY is a status output, not a command input. Address
-programming therefore needs a separately timed LDAC connection, or DACs
-preprogrammed to unique addresses before they share a bus. See the MCP4728
-datasheet, section 5.6.8, for the exact timing.
+The v3.0 bodge cuts the direct TCA9555 P0.6-to-LDAC trace.
+P0.6 instead selects the AFE's BSS138; SPIN connector pin 6 (STM32 PB15)
+drives the common MOSFET gate line. P0.6 LOW selects one DAC, while PB15 HIGH
+pulls that DAC's LDAC LOW. The LDAC node needs its own 5 V pull-up and P0.6
+needs a 5 V pull-up so an uninitialized expander remains unselected. All
+grounds must be common. `ldac-pulse-gpios` declares PB15; the provisioning
+SCL/SDA properties declare PA15/PB7.
+On v3.1, the selector moved to P0.0.
+
+With `auto-provision` and `zephyr,deferred-init` on an AFE node, Zephyr first
+initializes the I²C controller, muxes and other devices. At the APPLICATION
+init level, the AFE driver checks that the slot's expander responds, selects
+that slot with LDAC, reads its DAC address, and writes the DAC EEPROM only if
+the address differs from `dac-address`. It then initializes that AFE device.
+Missing expanders are skipped without taking control of the root I²C pins.
+The destination address must be unused on that mux channel. A slot that cannot
+be provisioned or initialized remains `NOT READY`; other slots continue.
+Before selecting a slot, the driver checks that no DAC responds to the
+address-read command with all selectors released. An unexpected response
+aborts provisioning to avoid writing an ambiguous DAC.
+Without these two properties, the driver initializes normally at POST_KERNEL
+and does not provision automatically.
+
+`gpio-layout = "v3-0"` is the default for v3.0 boards with the LDAC bodge;
+set `gpio-layout = "v3-1"` on each slot carrying a v3.1 AFE. The v3.1 layout
+uses P0.0 for LDAC selection, P0.1..P0.3 for bandwidth, and P0.4 for BWE.
+
+The address read and write temporarily drive PA15/PB7 as open-drain GPIOs.
+PB15 rises after the 8th SCL pulse of the second byte, while SCL is LOW, and
+falls after the third byte's ACK. The driver sends STOP, restores the I²C
+pinctrl state, recovers the STM32 I²C controller and deselects the AFE. Other
+DACs may still answer at the old address. Manual `afe ID provision` remains
+available after boot; run it only while the I²C bus is otherwise idle. See
+the MCP4728 datasheet,
+sections 5.4.4 and 5.6.8, for timing.
 
 ## Application API
 

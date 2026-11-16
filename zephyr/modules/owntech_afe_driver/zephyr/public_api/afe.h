@@ -103,8 +103,8 @@ int afe_dac_set_all_mv(const struct device *dev,
 		       const uint16_t millivolts[AFE_DAC_CHANNEL_COUNT]);
 
 /**
- * Pulse MCP4728 LDAC through the TCA9555 for DAC output updates.
- * This cannot meet the bit-level LDAC timing for MCP4728 address programming.
+ * Pulse MCP4728 LDAC for DAC output updates. With ldac-pulse-gpios, the
+ * configured TCA9555 output selects the AFE and the MCU drives the pulse.
  */
 int afe_latch(const struct device *dev);
 
@@ -115,14 +115,23 @@ int afe_dac_read(const struct device *dev,
 /**
  * Experimental MCP4728 address write from current_address to dac-address.
  *
- * Only one AFE/DAC may be connected to this mux branch at the source address.
- * The TCA9555 cannot generate the datasheet's bit-timed LDAC edge, so this
- * attempt is expected to fail on a conforming MCP4728. Success is reported
- * only if the new address responds and the old address stops responding.
+ * Requires LDAC selection hardware and a shared MCU GPIO for the precisely
+ * timed pulse. The driver temporarily
+ * bit-bangs the physical I2C pins and restores the controller pin function.
+ * The target address must be unused on this mux branch. Other DACs may remain
+ * at current_address; success requires a plausible reply at the new address.
  * Reboot after a successful EEPROM address change to retry Zephyr device init.
  */
 int afe_dac_provision_address_experimental(const struct device *dev,
 					   uint8_t current_address);
+
+/**
+ * Read this AFE's MCP4728 address using LDAC selection, then provision only
+ * when it differs from dac-address. previous_address may be NULL. The
+ * destination address must be free on this mux channel.
+ */
+int afe_dac_provision_address_auto(const struct device *dev,
+				   uint8_t *previous_address);
 
 /** Read all TCA9555 register pairs. Reading inputs acknowledges its INT. */
 int afe_gpio_read(const struct device *dev, struct afe_gpio_state *state);

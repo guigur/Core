@@ -14,6 +14,19 @@ properties:
     required: true
     description: MCP4728 7-bit address stored in the DAC EEPROM, normally 0x60.
 
+  auto-provision:
+    type: boolean
+    description: |
+      Provision the selected DAC after all Zephyr bus devices have initialized,
+      then initialize this deferred AFE device. Requires zephyr,deferred-init,
+      ldac-pulse-gpios, provision-scl-gpios and provision-sda-gpios.
+
+  gpio-layout:
+    type: string
+    enum: ["v3-0", "v3-1"]
+    default: "v3-0"
+    description: TCA9555 pin assignment of the installed AFE revision.
+
   int-gpios:
     type: phandle-array
     description: Optional active-low TCA9555 INT connection.
@@ -27,6 +40,21 @@ properties:
       address pins are strapped on the board. When the TCA9555 is powered at
       5 V from a 3.3 V MCU, use suitable 5 V tolerant open-drain pins with
       external pull-ups or level translation.
+
+  ldac-pulse-gpios:
+    type: phandle-array
+    description: |
+      Optional shared MCU GPIO driving the gates of the LDAC selection MOSFETs.
+      Active high: a high pulse pulls down the LDAC of the AFE selected by
+      TCA9555 P0.6 on the v3.0 bodge, or P0.0 on v3.1.
+
+  provision-scl-gpios:
+    type: phandle-array
+    description: Physical I2C SCL GPIO used for bit-timed DAC address writes.
+
+  provision-sda-gpios:
+    type: phandle-array
+    description: Physical I2C SDA GPIO used for bit-timed DAC address writes.
 
   startup-gain:
     type: int

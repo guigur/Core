@@ -540,7 +540,8 @@ static void help(void)
     printk("exercise all | exercise afe ID|all (changes AFE controls)\n");
     printk("afe ID reset|gain N|bw N|inputs PLUS MINUS|enable GAIN BW|led 0|1|dac CH MV\n");
     printk("afe ID identify [HZ [DURATION_MS]] | afe ID stop\n");
-    printk("afe ID provision CURRENT_DAC_ADDR (experimental EEPROM write; one AFE per branch)\n");
+    printk("afe ID provision (auto-detect DAC address; write EEPROM if needed)\n");
+    printk("afe ID provision CURRENT_DAC_ADDR (manual address override)\n");
     printk("pebb term 0|1 | pebb scl 0|1 (PA15/PA13) | pebb fan ID ignore|critical | pebb ack\n");
     printk("feeder run 0|1 | feeder sample CODE | feeder flags VALUE | feeder flush\n");
     printk("hb ID write HOURS VMAX IMAX FLAGS (writes HB 24C02S EEPROM)\n");
@@ -596,9 +597,24 @@ static void command(char *line)
     }
     if (!strcmp(a[0], "afe") && n >= 3 && parse(a[1], 9, &v[0])) {
         const struct device *dev = pebb_afe_get((pebb_afe_id)v[0]);
+        if (n == 3 && !strcmp(a[2], "provision")) {
+            uint8_t previous_address = 0;
+            int ret = afe_dac_provision_address_auto(dev, &previous_address);
+            if (ret == 0) {
+                printk("%s DAC: 0x%02x -> 0x%02x%s\n", afe_names[v[0]],
+                       previous_address, 0x60 + afe_address_indices[v[0]],
+                       previous_address == 0x60 + afe_address_indices[v[0]] ?
+                       " (already configured)" : " (provisioned)");
+                printk("Power-cycle to retry AFE driver initialization.\n");
+            } else {
+                result("DAC address auto-provision", ret);
+            }
+            scan_afe_buses(true);
+            return;
+        }
         if (n == 4 && !strcmp(a[2], "provision") &&
             parse(a[3], 0x67, &v[1]) && v[1] >= 0x60) {
-            printk("Experimental address write: %s ch%u 0x%02lx -> 0x%02x\n",
+            printk("Timed address write: %s ch%u 0x%02lx -> 0x%02x\n",
                    afe_names[v[0]], afe_mux_channels[v[0]], v[1],
                    0x60 + afe_address_indices[v[0]]);
             int ret = afe_dac_provision_address_experimental(dev, v[1]);
