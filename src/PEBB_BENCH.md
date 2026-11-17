@@ -27,6 +27,7 @@ IDs: AFEs 0–9 follow `pebb_afe_id`, and HB modules 0–2 follow `pebb_hb_id`.
 | `test pebb`, `test feeder` | Read-only checks of one subsystem |
 | `test afe 0`, `test afe all` | Read one or all AFE GPIO registers, DAC RAM/EEPROM and INT status |
 | `test hb 0`, `test hb all` | Read one or all HB temperatures, alerts and EEPROM records |
+| `hb alert status` | Show the six-channel 28 °C alarm mask, valid readings and configured sensor mask |
 | `exercise afe 0`, `exercise afe all` | Disconnect stages, set gain index 0 and bandwidth index 7, select external inputs, toggle LED, rewrite the current DAC A RAM value and read it back |
 | `exercise all` | Run `test all`, toggle/restore CAN/RS485 termination and exercise all AFEs |
 
@@ -91,6 +92,26 @@ or AFE write error, or an over-range reading, stops the waveform and resets
 all selected AFEs. `mock stop` does the same on request. While mock is running,
 the bench rejects other AFE control, provisioning, calibration, exercise and
 I²C recovery commands. Use `mock stop` before those operations.
+
+## HB temperature alarm and LED
+
+The bench starts monitoring the HS and LS T117B on each READY HB at boot.
+It configures each sensor's volatile hardware ALERT registers for a 28 °C
+upper threshold and 27 °C lower threshold, with an active-low ALERT output.
+No sensor EEPROM is written. Configuration retries if a READY sensor does not
+respond. The bench also compares the six measured temperatures with the same
+thresholds every 500 ms; this keeps the LED indication stable even if a
+temperature read clears the sensor's ALERT output. One or more channels at or
+above 28 °C make the SPIN user LED on PA5 blink once per second. The LED stops
+blinking once all alarmed channels fall to 27 °C or below. A failed reading
+does not clear an existing alarm.
+
+Use `hb alert status` to see `active_mask` (bit 0/1 = HB0 HS/LS, bit 2/3 =
+HB1 HS/LS, bit 4/5 = HB2 HS/LS), `valid_mask` for successful recent readings,
+and `configured_HB_mask` for completed hardware ALERT configuration. `test hb
+all` continues to show each sensor's measured temperature and raw ALERT pin.
+The raw pin can be inactive after a temperature read has acknowledged an
+alert; the software alarm mask controls the blinking LED.
 
 ## Feeder I²C wiring
 

@@ -75,6 +75,13 @@ int hb_temperature_get_millicelsius(const struct device *dev,
 /** Return 1 when the active-low T117B ALERT line is asserted, else 0. */
 int hb_alert_is_active(const struct device *dev, enum hb_side side);
 
+/** Configure both T117B ALERT pins in active-low high-temperature mode.
+ * Threshold registers are volatile; no sensor EEPROM is written.
+ */
+int hb_temperature_alert_configure(const struct device *dev,
+				   int32_t high_millicelsius,
+				   int32_t clear_millicelsius);
+
 /** Read version 1 of the shared 8-byte record; reject other versions. */
 int hb_module_data_read(const struct device *dev,
 			struct hb_module_data *module_data);

@@ -243,6 +243,71 @@ int hb_alert_is_active(const struct device *dev, enum hb_side side)
 	return gpio_pin_get_dt(&config->alerts[side]);
 }
 
+int hb_temperature_alert_configure(const struct device *dev,
+				   int32_t high_millicelsius,
+				   int32_t clear_millicelsius)
+{
+	const struct hb_config *config;
+	struct hb_data *data;
+	struct sensor_value off = {0, 0};
+	struct sensor_value on = {1, 0};
+	struct sensor_value high = {
+		.val1 = high_millicelsius / 1000,
+		.val2 = (high_millicelsius % 1000) * 1000,
+	};
+	struct sensor_value clear = {
+		.val1 = clear_millicelsius / 1000,
+		.val2 = (clear_millicelsius % 1000) * 1000,
+	};
+	int ret = 0;
+
+	if (dev == NULL || clear_millicelsius >= high_millicelsius) {
+		return -EINVAL;
+	}
+	if (!device_is_ready(dev)) {
+		return -ENODEV;
+	}
+	config = dev->config;
+	data = dev->data;
+	k_mutex_lock(&data->lock, K_FOREVER);
+	for (int side = HB_HIGH_SIDE; side <= HB_LOW_SIDE; ++side) {
+		ret = sensor_attr_set(config->sensors[side],
+				      SENSOR_CHAN_AMBIENT_TEMP,
+				      SENSOR_ATTR_ALERT, &off);
+		if (ret != 0) {
+			goto out;
+		}
+		ret = sensor_attr_set(config->sensors[side],
+				      SENSOR_CHAN_AMBIENT_TEMP,
+				      SENSOR_ATTR_UPPER_THRESH, &high);
+		if (ret != 0) {
+			goto out;
+		}
+		ret = sensor_attr_set(config->sensors[side],
+				      SENSOR_CHAN_AMBIENT_TEMP,
+				      SENSOR_ATTR_LOWER_THRESH, &clear);
+		if (ret != 0) {
+			goto out;
+		}
+		ret = sensor_attr_set(config->sensors[side],
+				      SENSOR_CHAN_AMBIENT_TEMP,
+				      SENSOR_ATTR_ALERT, &on);
+		if (ret != 0) {
+			goto out;
+		}
+	}
+out:
+	if (ret != 0) {
+		for (int side = HB_HIGH_SIDE; side <= HB_LOW_SIDE; ++side) {
+			(void)sensor_attr_set(config->sensors[side],
+					      SENSOR_CHAN_AMBIENT_TEMP,
+					      SENSOR_ATTR_ALERT, &off);
+		}
+	}
+	k_mutex_unlock(&data->lock);
+	return ret;
+}
+
 int hb_module_data_read(const struct device *dev,
 			struct hb_module_data *module_data)
 {

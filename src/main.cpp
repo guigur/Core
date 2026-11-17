@@ -8,6 +8,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/eeprom.h>
 #include <zephyr/drivers/adc.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
@@ -316,6 +317,87 @@ static void mock_start(uint16_t requested_mask, mock_shape shape,
            prepared_mask, gain, amplitude_mv, step_ms);
     (void)k_work_reschedule_for_queue(&mock_work_queue, &mock.work, K_NO_WAIT);
 }
+
+/* Six T117B sensors, bit 2*HB + side. A 1 C hysteresis avoids LED chatter. */
+static constexpr int32_t hb_alert_high_mc = 28000;
+static constexpr int32_t hb_alert_clear_mc = 27000;
+static const struct gpio_dt_spec hb_alert_led =
+    GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+K_THREAD_STACK_DEFINE(hb_monitor_stack, 3072);
+static struct k_thread hb_monitor_thread_data;
+K_MUTEX_DEFINE(hb_monitor_lock);
+static uint8_t hb_alert_active_mask;
+static uint8_t hb_alert_valid_mask;
+static uint8_t hb_alert_configured_mask;
+
+static void hb_monitor_thread(void *, void *, void *)
+{
+    if (!gpio_is_ready_dt(&hb_alert_led) ||
+        gpio_pin_configure_dt(&hb_alert_led, GPIO_OUTPUT_INACTIVE) != 0) {
+        printk("HB temperature monitor: SPIN user LED unavailable.\n");
+        return;
+    }
+    bool led_on = false;
+    uint8_t config_error_reported = 0;
+    while (true) {
+        uint8_t active;
+        uint8_t valid = 0;
+        uint8_t configured;
+        k_mutex_lock(&hb_monitor_lock, K_FOREVER);
+        active = hb_alert_active_mask;
+        configured = hb_alert_configured_mask;
+        k_mutex_unlock(&hb_monitor_lock);
+        for (unsigned int id = 0; id < PEBB_HB_COUNT; ++id) {
+            const struct device *dev = pebb_hb_get((pebb_hb_id)id);
+            if (!device_is_ready(dev)) continue;
+            if ((configured & BIT(id)) == 0) {
+                int ret = hb_temperature_alert_configure(
+                    dev, hb_alert_high_mc, hb_alert_clear_mc);
+                if (ret == 0) {
+                    configured |= BIT(id);
+                    config_error_reported &= ~BIT(id);
+                    printk("HB %u: hardware temperature ALERT set to 28 C "
+                           "(clear below 27 C).\n", id);
+                } else if ((config_error_reported & BIT(id)) == 0) {
+                    config_error_reported |= BIT(id);
+                    printk("HB %u: ALERT configuration failed (%d); "
+                           "retrying.\n", id, ret);
+                }
+            }
+            for (int side = HB_HIGH_SIDE; side <= HB_LOW_SIDE; ++side) {
+                uint8_t bit = BIT(2U * id + side);
+                int32_t temperature_mc;
+                int ret = hb_temperature_get_millicelsius(
+                    dev, (hb_side)side, &temperature_mc);
+                if (ret != 0) {
+                    /* A sensor reset may have lost the volatile thresholds. */
+                    configured &= ~BIT(id);
+                    continue;
+                }
+                valid |= bit;
+                bool was_active = (active & bit) != 0;
+                if (temperature_mc >= hb_alert_high_mc) active |= bit;
+                else if (temperature_mc <= hb_alert_clear_mc) active &= ~bit;
+                if (was_active != ((active & bit) != 0)) {
+                    printk("HB %u %s temperature %s: %ld mC\n", id,
+                           side == HB_HIGH_SIDE ? "HS" : "LS",
+                           (active & bit) ? "ALERT" : "clear",
+                           (long)temperature_mc);
+                }
+            }
+        }
+        k_mutex_lock(&hb_monitor_lock, K_FOREVER);
+        hb_alert_active_mask = active;
+        hb_alert_valid_mask = valid;
+        hb_alert_configured_mask = configured;
+        k_mutex_unlock(&hb_monitor_lock);
+        /* One-second blink while any of the six sensors is in alarm. */
+        led_on = active != 0 && !led_on;
+        (void)gpio_pin_set_dt(&hb_alert_led, led_on ? 1 : 0);
+        k_msleep(500);
+    }
+}
+
 static const char *const afe_ch0_slots[8] = {
     "I2_LOW", "V3_LOW", "ANALOG1", "I3_LOW", "V2_LOW",
     "unexpected", "unexpected", "unexpected"
@@ -830,6 +912,7 @@ static void help(void)
     printk("pebb term 0|1 | pebb scl 0|1 (PA15/PA13) | pebb fan ID ignore|critical | pebb ack\n");
     printk("feeder run 0|1 | feeder sample CODE | feeder flags VALUE | feeder flush\n");
     printk("hb ID write HOURS VMAX IMAX FLAGS (writes HB 24C02S EEPROM)\n");
+    printk("hb alert status (28 C trip, 27 C clear; SPIN PA5 LED blinks)\n");
     printk("IDs start at zero. HB write and feeder checkpoints use EEPROM.\n");
     printk("SCL=1 selects PA13, which requires matching MCU pin configuration.\n");
 }
@@ -936,6 +1019,17 @@ static void command(char *line)
                 return;
             }
         }
+    }
+    if (n == 3 && !strcmp(a[0], "hb") &&
+        !strcmp(a[1], "alert") && !strcmp(a[2], "status")) {
+        k_mutex_lock(&hb_monitor_lock, K_FOREVER);
+        printk("HB alert: trip=28000 mC clear=27000 mC "
+               "active_mask=0x%02x valid_mask=0x%02x "
+               "configured_HB_mask=0x%01x; LED=SPIN PA5\n",
+               hb_alert_active_mask, hb_alert_valid_mask,
+               hb_alert_configured_mask);
+        k_mutex_unlock(&hb_monitor_lock);
+        return;
     }
     if (!strcmp(a[0], "afe") && n >= 3 && parse(a[1], 9, &v[0])) {
         const struct device *dev = pebb_afe_get((pebb_afe_id)v[0]);
@@ -1083,6 +1177,11 @@ int main(void)
     k_work_queue_start(&mock_work_queue, mock_work_stack,
                        K_THREAD_STACK_SIZEOF(mock_work_stack),
                        K_PRIO_PREEMPT(10), NULL);
+    k_tid_t hb_monitor_tid = k_thread_create(
+        &hb_monitor_thread_data, hb_monitor_stack,
+        K_THREAD_STACK_SIZEOF(hb_monitor_stack), hb_monitor_thread,
+        NULL, NULL, NULL, K_PRIO_PREEMPT(11), 0, K_NO_WAIT);
+    k_thread_name_set(hb_monitor_tid, "hb_temp_alert");
     k_msleep(500);
     printk("\n\n========== PEBB DRIVER BENCH READY ==========\n");
     printk("Type help, scan, or dacscan.\n> ");

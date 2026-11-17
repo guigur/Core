@@ -37,6 +37,17 @@ conversion by writing register `0x04`, and reads temperature from `0x00`–`0x01
 The signed little-endian code is relative to 25°C with a scale of 1/256°C.
 `hb_alert_is_active()` reads the corresponding active-low ALERT input.
 
+`hb_temperature_alert_configure(hb, high_mc, clear_mc)` programs both T117B
+sensors on one module. It writes the volatile high/low threshold registers
+and enables active-low comparator ALERT, with readback verification. The
+T117B Zephyr sensor also accepts `SENSOR_ATTR_UPPER_THRESH`,
+`SENSOR_ATTR_LOWER_THRESH` and `SENSOR_ATTR_ALERT`. The bench configures
+28,000 m°C and 27,000 m°C at boot, then polls all six temperatures and blinks
+the SPIN user LED on PA5 while any sensor is above the high limit. `hb alert
+status` shows the active, valid and configured masks. The bench also uses
+software hysteresis because reading a T117B temperature may acknowledge its
+hardware ALERT. These writes do not program the T117B EEPROM.
+
 ## External EEPROM map
 
 `hb_eeprom_device(hb)` returns the board's native 256-byte Zephyr EEPROM.

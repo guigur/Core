@@ -6,7 +6,9 @@
 #define DT_DRV_COMPAT mysentech_t117b
 
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2c.h>
@@ -15,7 +17,11 @@
 
 #define T117B_REG_TEMP_LSB 0x00U
 #define T117B_REG_TEMP_CMD 0x04U
+#define T117B_REG_ALERT_MODE 0x06U
+#define T117B_REG_HIGH_LIMIT 0x07U
+#define T117B_REG_LOW_LIMIT 0x09U
 #define T117B_REG_ROMCODE  0x18U
+#define T117B_ALERT_ENABLE 0x80U
 
 struct t117b_config {
 	struct i2c_dt_spec bus;
@@ -60,9 +66,64 @@ static int t117b_channel_get(const struct device *dev,
 	return 0;
 }
 
+static int t117b_attribute_set(const struct device *dev,
+			       enum sensor_channel chan,
+			       enum sensor_attribute attr,
+			       const struct sensor_value *val)
+{
+	const struct t117b_config *config = dev->config;
+	uint8_t reg;
+	uint8_t written[2];
+	uint8_t readback[2];
+	size_t size;
+	int ret;
+
+	if (chan != SENSOR_CHAN_AMBIENT_TEMP || val == NULL) {
+		return -EINVAL;
+	}
+	if (attr == SENSOR_ATTR_ALERT) {
+		if (val->val2 != 0 || (val->val1 != 0 && val->val1 != 1)) {
+			return -EINVAL;
+		}
+		reg = T117B_REG_ALERT_MODE;
+		written[0] = val->val1 ? T117B_ALERT_ENABLE : 0U;
+		size = 1U;
+	} else if (attr == SENSOR_ATTR_UPPER_THRESH ||
+		   attr == SENSOR_ATTR_LOWER_THRESH) {
+		/* T117B threshold codes are signed 1/256 C relative to 25 C. */
+		int64_t microcelsius = (int64_t)val->val1 * 1000000LL +
+					val->val2;
+		int64_t scaled = (microcelsius - 25000000LL) * 256LL;
+		int64_t code = scaled >= 0 ?
+			(scaled + 500000LL) / 1000000LL :
+			(scaled - 500000LL) / 1000000LL;
+
+		if (code < INT16_MIN || code > INT16_MAX) {
+			return -ERANGE;
+		}
+		reg = attr == SENSOR_ATTR_UPPER_THRESH ?
+			T117B_REG_HIGH_LIMIT : T117B_REG_LOW_LIMIT;
+		written[0] = (uint8_t)code;
+		written[1] = (uint8_t)((uint16_t)code >> 8);
+		size = 2U;
+	} else {
+		return -ENOTSUP;
+	}
+	ret = i2c_burst_write_dt(&config->bus, reg, written, size);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = i2c_burst_read_dt(&config->bus, reg, readback, size);
+	if (ret != 0) {
+		return ret;
+	}
+	return memcmp(written, readback, size) == 0 ? 0 : -EIO;
+}
+
 static const struct sensor_driver_api t117b_api = {
 	.sample_fetch = t117b_sample_fetch,
 	.channel_get = t117b_channel_get,
+	.attr_set = t117b_attribute_set,
 };
 
 static int t117b_init(const struct device *dev)
