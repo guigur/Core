@@ -46,6 +46,34 @@ struct afe_dac_state {
 	uint8_t power_down;
 };
 
+/** One gain's measured transfer function: OUT = intercept + slope * (IN+ - IN-). */
+struct afe_gain_calibration {
+	float slope;
+	float intercept_mv;
+	float r_squared;
+	uint16_t output_offset_mv;
+};
+
+/** Return the measured AFE OUT voltage in mV through the application's ADC. */
+typedef int (*afe_measure_output_fn)(const void *context, uint16_t *millivolts);
+
+/**
+ * Run a nine-point self-test sweep for one gain and store the fit in RAM.
+ * The AFE ends in its safe startup state, including on failure. Exclusive
+ * access to this AFE is required while calibration runs. EEPROM is untouched.
+ */
+int afe_calibrate_gain(const struct device *dev, uint8_t gain_index,
+		       afe_measure_output_fn measure, const void *context,
+		       struct afe_gain_calibration *result);
+
+/** Get a previously measured gain fit; returns -ENOENT if not calibrated. */
+int afe_get_gain_calibration(const struct device *dev, uint8_t gain_index,
+			     struct afe_gain_calibration *result);
+
+/** Apply the measured slope and intercept to an AFE OUT ADC result. */
+int afe_correct_output_mv(const struct device *dev, uint8_t gain_index,
+			  uint16_t raw_mv, int32_t *corrected_mv);
+
 /**
  * Reinitialize an AFE with its devicetree startup values.
  *

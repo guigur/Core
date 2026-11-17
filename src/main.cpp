@@ -7,8 +7,10 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/eeprom.h>
+#include <zephyr/drivers/adc.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/util.h>
 #include <zephyr/sys/printk.h>
 #include <afe.h>
 #include <feeder.h>
@@ -34,6 +36,286 @@ static const uint8_t afe_mux_channels[PEBB_AFE_COUNT] = {
 static const uint8_t afe_address_indices[PEBB_AFE_COUNT] = {
     1, 0, 4, 1, 4, 2, 0, 3, 2, 3
 };
+
+/* PEBB KiCad OUT nets to U401: ADC1 PC0/1/2/3/PB11, ADC2 PA0/1/7/PC5/PA4. */
+struct afe_adc_binding {
+    const struct device *device;
+    uint8_t channel;
+};
+
+static const afe_adc_binding afe_output_adc[PEBB_AFE_COUNT] = {
+    { DEVICE_DT_GET(DT_NODELABEL(adc1)), 8 },  /* V_HIGH  PC2 */
+    { DEVICE_DT_GET(DT_NODELABEL(adc1)), 6 },  /* V1_LOW  PC0 */
+    { DEVICE_DT_GET(DT_NODELABEL(adc2)), 1 },  /* V2_LOW  PA0 */
+    { DEVICE_DT_GET(DT_NODELABEL(adc2)), 4 },  /* V3_LOW  PA7 */
+    { DEVICE_DT_GET(DT_NODELABEL(adc1)), 9 },  /* I_HIGH  PC3 */
+    { DEVICE_DT_GET(DT_NODELABEL(adc1)), 7 },  /* I1_LOW  PC1 */
+    { DEVICE_DT_GET(DT_NODELABEL(adc2)), 2 },  /* I2_LOW  PA1 */
+    { DEVICE_DT_GET(DT_NODELABEL(adc1)), 14 }, /* I3_LOW  PB11 */
+    { DEVICE_DT_GET(DT_NODELABEL(adc2)), 11 }, /* ANALOG1 PC5 */
+    { DEVICE_DT_GET(DT_NODELABEL(adc2)), 17 }, /* ANALOG2 PA4 */
+};
+
+static int afe_adc_setup(const afe_adc_binding *binding)
+{
+    if (!device_is_ready(binding->device)) return -ENODEV;
+    struct adc_channel_cfg cfg = {};
+    cfg.gain = ADC_GAIN_1;
+    cfg.reference = ADC_REF_INTERNAL;
+    cfg.acquisition_time = ADC_ACQ_TIME_MAX;
+    cfg.channel_id = binding->channel;
+    return adc_channel_setup(binding->device, &cfg);
+}
+
+static int afe_adc_measure(const void *context, uint16_t *millivolts)
+{
+    const auto *binding = static_cast<const afe_adc_binding *>(context);
+    uint32_t sum = 0;
+    for (unsigned int sample_index = 0; sample_index < 17; ++sample_index) {
+        int16_t raw = 0;
+        struct adc_sequence sequence = {};
+        sequence.channels = BIT(binding->channel);
+        sequence.buffer = &raw;
+        sequence.buffer_size = sizeof(raw);
+        sequence.resolution = 12;
+        int ret = adc_read(binding->device, &sequence);
+        if (ret != 0) return ret;
+        if (sample_index != 0) sum += static_cast<uint16_t>(raw);
+    }
+    int32_t averaged = static_cast<int32_t>((sum + 8U) / 16U);
+    int ret = adc_raw_to_millivolts(adc_ref_internal(binding->device),
+                                    ADC_GAIN_1, 12, &averaged);
+    if (ret != 0 || averaged < 0 || averaged > UINT16_MAX)
+        return ret != 0 ? ret : -ERANGE;
+    *millivolts = static_cast<uint16_t>(averaged);
+    return 0;
+}
+
+static void print_afe_calibration(unsigned int id, unsigned int gain,
+                                  const afe_gain_calibration &fit)
+{
+    float nominal = afe_gain_value(gain);
+    float error_percent = 100.0F * (fit.slope - nominal) / nominal;
+    printk("AFE %u %s gain %u: slope=%0.5f nominal=%0.5f error=%+0.2f%% "
+           "intercept=%0.2f mV R2=%0.5f offset_DAC=%u mV\n",
+           id, afe_names[id], gain, (double)fit.slope, (double)nominal,
+           (double)error_percent, (double)fit.intercept_mv,
+           (double)fit.r_squared, fit.output_offset_mv);
+}
+
+enum class mock_shape : uint8_t { sine, square, triangle };
+
+struct mock_state {
+    struct k_work_delayable work;
+    uint16_t active_mask;
+    uint16_t amplitude_mv;
+    uint32_t step_ms;
+    uint32_t stream_ms;
+    int64_t last_print_ms;
+    uint8_t gain;
+    uint8_t phase;
+    mock_shape shape;
+    bool active;
+};
+
+K_MUTEX_DEFINE(mock_lock);
+static mock_state mock = {};
+static struct k_work_sync mock_work_sync;
+K_THREAD_STACK_DEFINE(mock_work_stack, 3072);
+static struct k_work_q mock_work_queue;
+static const uint16_t mock_max_amplitude_mv[AFE_GAIN_COUNT] = {
+    15, 30, 60, 150, 300, 600, 1200, 1500
+};
+static const int16_t mock_sine_1000[32] = {
+       0,  195,  383,  556,  707,  831,  924,  981,
+    1000,  981,  924,  831,  707,  556,  383,  195,
+       0, -195, -383, -556, -707, -831, -924, -981,
+   -1000, -981, -924, -831, -707, -556, -383, -195
+};
+
+static int16_t mock_differential_mv()
+{
+    int32_t amplitude = mock.amplitude_mv;
+    int32_t sample = 0;
+    if (mock.shape == mock_shape::sine)
+        sample = (amplitude * mock_sine_1000[mock.phase]) / 1000;
+    else if (mock.shape == mock_shape::square)
+        sample = mock.phase < 16 ? -amplitude : amplitude;
+    else if (mock.phase <= 16)
+        sample = -amplitude + (amplitude * mock.phase) / 8;
+    else
+        sample = amplitude - (amplitude * (mock.phase - 16)) / 8;
+    return static_cast<int16_t>(sample);
+}
+
+static void mock_print_header()
+{
+    printk("AFE_OUT_MV,uptime_ms,ready_mask");
+    for (unsigned int id = 0; id < PEBB_AFE_COUNT; ++id)
+        printk(",%s", afe_names[id]);
+    printk("\n");
+}
+
+static void mock_print_values()
+{
+    uint16_t ready_mask = 0;
+    uint16_t values[PEBB_AFE_COUNT] = {};
+    int errors[PEBB_AFE_COUNT] = {};
+    for (unsigned int id = 0; id < PEBB_AFE_COUNT; ++id) {
+        if (device_is_ready(pebb_afe_get((pebb_afe_id)id)))
+            ready_mask |= BIT(id);
+        errors[id] = afe_adc_setup(&afe_output_adc[id]);
+        if (errors[id] == 0)
+            errors[id] = afe_adc_measure(&afe_output_adc[id], &values[id]);
+    }
+    printk("AFE_OUT_MV,%lld,0x%03x", (long long)k_uptime_get(), ready_mask);
+    for (unsigned int id = 0; id < PEBB_AFE_COUNT; ++id) {
+        if (errors[id] == 0) printk(",%u", values[id]);
+        else printk(",ERR(%d)", errors[id]);
+    }
+    printk("\n");
+}
+
+static void mock_reset_mask(uint16_t mask)
+{
+    for (unsigned int id = 0; id < PEBB_AFE_COUNT; ++id) {
+        if ((mask & BIT(id)) == 0) continue;
+        int ret = afe_reset(pebb_afe_get((pebb_afe_id)id));
+        if (ret != 0)
+            printk("MOCK: %s safe reset failed (%d)\n", afe_names[id], ret);
+    }
+}
+
+static void mock_step_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    uint16_t reset_mask = 0;
+    int error = 0;
+    unsigned int failed_id = 0;
+    k_mutex_lock(&mock_lock, K_FOREVER);
+    if (!mock.active) {
+        k_mutex_unlock(&mock_lock);
+        return;
+    }
+    uint16_t stimulus_mv = static_cast<uint16_t>(2500 + mock_differential_mv());
+    for (unsigned int id = 0; id < PEBB_AFE_COUNT; ++id) {
+        if ((mock.active_mask & BIT(id)) == 0) continue;
+        error = afe_dac_set_mv(pebb_afe_get((pebb_afe_id)id),
+                               AFE_DAC_SELF_PLUS, stimulus_mv, false);
+        if (error != 0) { failed_id = id; break; }
+    }
+    if (error == 0) {
+        k_msleep(5);
+        for (unsigned int id = 0; id < PEBB_AFE_COUNT; ++id) {
+            if ((mock.active_mask & BIT(id)) == 0) continue;
+            uint16_t measured_mv = 0;
+            error = afe_adc_measure(&afe_output_adc[id], &measured_mv);
+            if (error == 0 && measured_mv > 2200U) error = -ERANGE;
+            if (error != 0) { failed_id = id; break; }
+        }
+    }
+    int64_t now_ms = k_uptime_get();
+    if (error == 0 && mock.stream_ms != 0 &&
+        now_ms - mock.last_print_ms >= mock.stream_ms) {
+        mock_print_values();
+        mock.last_print_ms = now_ms;
+    }
+    if (error == 0) {
+        mock.phase = (mock.phase + 1U) & 31U;
+        (void)k_work_reschedule_for_queue(&mock_work_queue, &mock.work,
+                                          K_MSEC(mock.step_ms));
+    } else {
+        reset_mask = mock.active_mask;
+        mock.active = false;
+        mock.active_mask = 0;
+    }
+    k_mutex_unlock(&mock_lock);
+    if (error != 0) {
+        printk("MOCK stopped: %s measurement/control error (%d)\n",
+               afe_names[failed_id], error);
+        mock_reset_mask(reset_mask);
+    }
+}
+
+static void mock_stop(bool announce = true)
+{
+    (void)k_work_cancel_delayable_sync(&mock.work, &mock_work_sync);
+    k_mutex_lock(&mock_lock, K_FOREVER);
+    uint16_t mask = mock.active_mask;
+    mock.active = false;
+    mock.active_mask = 0;
+    k_mutex_unlock(&mock_lock);
+    mock_reset_mask(mask);
+    if (announce)
+        printk("MOCK stopped; selected AFEs returned to safe startup state.\n");
+}
+
+static void mock_start(uint16_t requested_mask, mock_shape shape,
+                       uint16_t amplitude_mv, uint32_t step_ms, uint8_t gain)
+{
+    if (amplitude_mv > mock_max_amplitude_mv[gain]) {
+        printk("MOCK amplitude exceeds %u mV for gain %u.\n",
+               mock_max_amplitude_mv[gain], gain);
+        return;
+    }
+    mock_stop(false);
+    uint16_t prepared_mask = 0;
+    int error = 0;
+    unsigned int failed_id = 0;
+    for (unsigned int id = 0; id < PEBB_AFE_COUNT; ++id) {
+        if ((requested_mask & BIT(id)) == 0) continue;
+        const struct device *dev = pebb_afe_get((pebb_afe_id)id);
+        if (!device_is_ready(dev)) {
+            if (requested_mask == 0x03ffU) continue;
+            error = -ENODEV;
+            failed_id = id;
+            break;
+        }
+        prepared_mask |= BIT(id);
+        error = afe_adc_setup(&afe_output_adc[id]);
+        if (error == 0) error = afe_reset(dev);
+        if (error == 0)
+            error = afe_dac_set_mv(dev, AFE_DAC_SELF_PLUS, 2500U, false);
+        if (error == 0)
+            error = afe_dac_set_mv(dev, AFE_DAC_SELF_MINUS, 2500U, false);
+        if (error == 0) error = afe_set_inputs(dev, true, true);
+        if (error == 0) error = afe_set_gain(dev, gain);
+        if (error == 0) error = afe_set_bandwidth(dev, 7U);
+        if (error == 0) error = afe_set_enabled(dev, true, true);
+        if (error == 0) {
+            k_msleep(25);
+            uint16_t measured_mv = 0;
+            error = afe_adc_measure(&afe_output_adc[id], &measured_mv);
+            if (error == 0 && measured_mv > 2200U) error = -ERANGE;
+        }
+        if (error != 0) { failed_id = id; break; }
+    }
+    if (error != 0 || prepared_mask == 0) {
+        mock_reset_mask(prepared_mask);
+        if (prepared_mask == 0 && error == 0)
+            printk("MOCK start failed: no AFE READY in requested slots.\n");
+        else
+            printk("MOCK start failed: %s (%d); prepared mask=0x%03x\n",
+                   afe_names[failed_id], error, prepared_mask);
+        return;
+    }
+    k_mutex_lock(&mock_lock, K_FOREVER);
+    mock.active_mask = prepared_mask;
+    mock.amplitude_mv = amplitude_mv;
+    mock.step_ms = step_ms;
+    mock.stream_ms = 500U;
+    mock.last_print_ms = k_uptime_get() - 500;
+    mock.gain = gain;
+    mock.phase = 0;
+    mock.shape = shape;
+    mock.active = true;
+    k_mutex_unlock(&mock_lock);
+    mock_print_header();
+    printk("MOCK started: mask=0x%03x gain=%u amp=%u mV step=%u ms "
+           "(32 steps/cycle); stream=500 ms.\n",
+           prepared_mask, gain, amplitude_mv, step_ms);
+    (void)k_work_reschedule_for_queue(&mock_work_queue, &mock.work, K_NO_WAIT);
+}
 static const char *const afe_ch0_slots[8] = {
     "I2_LOW", "V3_LOW", "ANALOG1", "I3_LOW", "V2_LOW",
     "unexpected", "unexpected", "unexpected"
@@ -542,6 +824,9 @@ static void help(void)
     printk("afe ID identify [HZ [DURATION_MS]] | afe ID stop\n");
     printk("afe ID provision (auto-detect DAC address; write EEPROM if needed)\n");
     printk("afe ID provision CURRENT_DAC_ADDR (manual address override)\n");
+    printk("afe ID calibrate [GAIN] | afe ID calstatus (ADC sweep, RAM coefficients)\n");
+    printk("mock start ID|all sine|square|triangle AMP_MV STEP_MS [GAIN] | mock stop\n");
+    printk("mock read | mock stream PERIOD_MS (0=off) | mock status\n");
     printk("pebb term 0|1 | pebb scl 0|1 (PA15/PA13) | pebb fan ID ignore|critical | pebb ack\n");
     printk("feeder run 0|1 | feeder sample CODE | feeder flags VALUE | feeder flush\n");
     printk("hb ID write HOURS VMAX IMAX FLAGS (writes HB 24C02S EEPROM)\n");
@@ -559,6 +844,63 @@ static void command(char *line)
          p = strtok_r(NULL, " \t", &save)) a[n++] = p;
     if (!n) return;
     if (!strcmp(a[0], "help")) { help(); return; }
+    if (!strcmp(a[0], "mock") && n >= 2) {
+        if (n == 2 && !strcmp(a[1], "stop")) { mock_stop(); return; }
+        if (n == 2 && !strcmp(a[1], "read")) {
+            k_mutex_lock(&mock_lock, K_FOREVER);
+            mock_print_header();
+            mock_print_values();
+            k_mutex_unlock(&mock_lock);
+            return;
+        }
+        if (n == 2 && !strcmp(a[1], "status")) {
+            k_mutex_lock(&mock_lock, K_FOREVER);
+            printk("MOCK: %s mask=0x%03x gain=%u amp=%u mV step=%u ms "
+                   "stream=%u ms\n", mock.active ? "RUNNING" : "STOPPED",
+                   mock.active_mask, mock.gain, mock.amplitude_mv,
+                   mock.step_ms, mock.stream_ms);
+            k_mutex_unlock(&mock_lock);
+            return;
+        }
+        if (n == 3 && !strcmp(a[1], "stream") &&
+            parse(a[2], 60000, &v[0])) {
+            k_mutex_lock(&mock_lock, K_FOREVER);
+            mock.stream_ms = v[0];
+            k_mutex_unlock(&mock_lock);
+            printk("MOCK stream interval: %lu ms\n", v[0]);
+            return;
+        }
+        if (!strcmp(a[1], "start") && (n == 6 || n == 7)) {
+            uint16_t mask = 0;
+            if (!strcmp(a[2], "all")) mask = 0x03ffU;
+            else if (parse(a[2], PEBB_AFE_COUNT - 1, &v[3]))
+                mask = BIT(v[3]);
+            mock_shape shape;
+            if (!strcmp(a[3], "sine")) shape = mock_shape::sine;
+            else if (!strcmp(a[3], "square")) shape = mock_shape::square;
+            else if (!strcmp(a[3], "triangle")) shape = mock_shape::triangle;
+            else { printk("Unknown mock waveform.\n"); return; }
+            if (mask != 0 && parse(a[4], 1500, &v[0]) &&
+                parse(a[5], 2000, &v[1]) && v[1] >= 20 &&
+                (n == 6 || parse(a[6], AFE_GAIN_COUNT - 1, &v[2]))) {
+                mock_start(mask, shape, v[0], v[1], n == 6 ? 4 : v[2]);
+                return;
+            }
+        }
+        printk("Usage: mock start ID|all sine|square|triangle AMP_MV STEP_MS [GAIN] "
+               "| stop | read | stream PERIOD_MS | status\n");
+        return;
+    }
+    k_mutex_lock(&mock_lock, K_FOREVER);
+    bool mock_running = mock.active;
+    k_mutex_unlock(&mock_lock);
+    if (mock_running &&
+        ((!strcmp(a[0], "afe") && n >= 3 && strcmp(a[2], "calstatus")) ||
+         !strcmp(a[0], "exercise") || !strcmp(a[0], "i2crecover") ||
+         (!strcmp(a[0], "pebb") && n >= 2 && !strcmp(a[1], "scl")))) {
+        printk("Stop mock mode before changing AFE controls or I2C routing.\n");
+        return;
+    }
     if (n == 1 && !strcmp(a[0], "scan")) { scan(); return; }
     if (n == 1 && !strcmp(a[0], "dacscan")) { scan_afe_buses(true); return; }
     if (n == 1 && !strcmp(a[0], "feederdiag")) { feeder_diag(); return; }
@@ -621,6 +963,44 @@ static void command(char *line)
             result("DAC address change verified", ret);
             if (ret == 0) printk("Power-cycle to retry AFE driver initialization.\n");
             scan_afe_buses(true);
+            return;
+        }
+        if (n == 3 && !strcmp(a[2], "calstatus")) {
+            if (!device_is_ready(dev)) { result("AFE", -ENODEV); return; }
+            for (unsigned int gain = 0; gain < AFE_GAIN_COUNT; ++gain) {
+                afe_gain_calibration fit = {};
+                int ret = afe_get_gain_calibration(dev, gain, &fit);
+                if (ret == 0) print_afe_calibration(v[0], gain, fit);
+                else printk("AFE %lu %s gain %u: not calibrated\n",
+                            v[0], afe_names[v[0]], gain);
+            }
+            return;
+        }
+        if (!strcmp(a[2], "calibrate") && (n == 3 || n == 4)) {
+            if (!device_is_ready(dev)) { result("AFE", -ENODEV); return; }
+            if (n == 4 && !parse(a[3], AFE_GAIN_COUNT - 1, &v[1])) {
+                printk("Invalid gain index.\n"); return;
+            }
+            const afe_adc_binding *binding = &afe_output_adc[v[0]];
+            int ret = afe_adc_setup(binding);
+            if (ret != 0) { result("AFE output ADC setup", ret); return; }
+            unsigned int first = n == 4 ? v[1] : 0;
+            unsigned int last = n == 4 ? v[1] : AFE_GAIN_COUNT - 1;
+            printk("Calibrating %s via ADC%u channel %u; OUT must stay below 2.2 V.\n",
+                   afe_names[v[0]], binding->device == DEVICE_DT_GET(DT_NODELABEL(adc1)) ? 1 : 2,
+                   binding->channel);
+            for (unsigned int gain = first; gain <= last; ++gain) {
+                afe_gain_calibration fit = {};
+                ret = afe_calibrate_gain(dev, gain, afe_adc_measure,
+                                         binding, &fit);
+                if (fit.slope > 0.0F) print_afe_calibration(v[0], gain, fit);
+                if (ret != 0) {
+                    printk("AFE %lu %s gain %u calibration: FAIL (%d)\n",
+                           v[0], afe_names[v[0]], gain, ret);
+                    break;
+                }
+            }
+            if (ret == 0) printk("Calibration stored in RAM; AFE returned to safe startup state.\n");
             return;
         }
         if (!device_is_ready(dev)) { result("AFE", -ENODEV); return; }
@@ -699,6 +1079,10 @@ int main(void)
 {
     char line[128];
     size_t used = 0;
+    k_work_init_delayable(&mock.work, mock_step_handler);
+    k_work_queue_start(&mock_work_queue, mock_work_stack,
+                       K_THREAD_STACK_SIZEOF(mock_work_stack),
+                       K_PRIO_PREEMPT(10), NULL);
     k_msleep(500);
     printk("\n\n========== PEBB DRIVER BENCH READY ==========\n");
     printk("Type help, scan, or dacscan.\n> ");

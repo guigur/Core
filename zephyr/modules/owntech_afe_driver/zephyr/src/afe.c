@@ -77,11 +77,20 @@ struct afe_data {
 	bool configured;
 	bool identifying;
 	bool prepared;
+	struct afe_gain_calibration calibration[AFE_GAIN_COUNT];
+	bool calibration_valid[AFE_GAIN_COUNT];
 };
 
 static const float afe_gains[AFE_GAIN_COUNT] = {
 	20.0F, 10.0F, 4.99F, 2.0F, 1.0F, 0.499F, 0.249F, 0.124F,
 };
+
+static void afe_clear_calibration(struct afe_data *data)
+{
+	for (uint8_t index = 0; index < AFE_GAIN_COUNT; ++index) {
+		data->calibration_valid[index] = false;
+	}
+}
 
 static uint16_t afe_ldac_mask(const struct afe_config *config)
 {
@@ -915,6 +924,156 @@ int afe_dac_provision_address_auto(const struct device *dev,
 	return afe_dac_provision_address_experimental(dev, current_address);
 }
 
+static const uint16_t afe_calibration_span_mv[AFE_GAIN_COUNT] = {
+	15U, 30U, 60U, 150U, 300U, 600U, 1200U, 1500U,
+};
+
+int afe_calibrate_gain(const struct device *dev, uint8_t gain_index,
+		       afe_measure_output_fn measure, const void *context,
+		       struct afe_gain_calibration *result)
+{
+	const struct afe_config *config;
+	struct afe_data *data;
+	struct afe_gain_calibration fit;
+	float sum_x = 0.0F, sum_y = 0.0F, sum_xx = 0.0F;
+	float sum_xy = 0.0F, sum_yy = 0.0F;
+	float denominator, variance_y, covariance, error_fraction;
+	uint16_t measured_mv;
+	int ret;
+	int reset_ret;
+
+	if (dev == NULL || measure == NULL || result == NULL ||
+	    gain_index >= AFE_GAIN_COUNT || !device_is_ready(dev)) {
+		return -EINVAL;
+	}
+	*result = (struct afe_gain_calibration){0};
+	config = dev->config;
+	data = dev->data;
+	k_mutex_lock(&data->lock, K_FOREVER);
+	data->calibration_valid[gain_index] = false;
+	k_mutex_unlock(&data->lock);
+
+	ret = afe_reset(dev);
+	if (ret != 0) {
+		return ret;
+	}
+	ret = afe_dac_set_mv(dev, AFE_DAC_SELF_PLUS, 2500U, false);
+	if (ret != 0) goto safe;
+	ret = afe_dac_set_mv(dev, AFE_DAC_SELF_MINUS, 2500U, false);
+	if (ret != 0) goto safe;
+	ret = afe_set_inputs(dev, true, true);
+	if (ret != 0) goto safe;
+	ret = afe_set_gain(dev, gain_index);
+	if (ret != 0) goto safe;
+	ret = afe_set_bandwidth(dev, 7U);
+	if (ret != 0) goto safe;
+	ret = afe_set_enabled(dev, true, true);
+	if (ret != 0) goto safe;
+	k_msleep(50);
+	ret = measure(context, &measured_mv);
+	if (ret != 0) goto safe;
+	if (measured_mv > 2200U) {
+		ret = -ERANGE;
+		goto safe;
+	}
+
+	for (int point = -4; point <= 4; ++point) {
+		int32_t differential_mv =
+			((int32_t)afe_calibration_span_mv[gain_index] * point) / 4;
+		uint16_t stimulus_mv = (uint16_t)(2500 + differential_mv);
+		float x = (float)differential_mv;
+		float y;
+
+		ret = afe_dac_set_mv(dev, AFE_DAC_SELF_PLUS, stimulus_mv, false);
+		if (ret != 0) goto safe;
+		k_msleep(25);
+		ret = measure(context, &measured_mv);
+		if (ret != 0) goto safe;
+		if (measured_mv > 2200U) {
+			ret = -ERANGE;
+			goto safe;
+		}
+		y = (float)measured_mv;
+		sum_x += x;
+		sum_y += y;
+		sum_xx += x * x;
+		sum_xy += x * y;
+		sum_yy += y * y;
+	}
+	denominator = 9.0F * sum_xx - sum_x * sum_x;
+	variance_y = 9.0F * sum_yy - sum_y * sum_y;
+	covariance = 9.0F * sum_xy - sum_x * sum_y;
+	if (denominator <= 0.0F || variance_y <= 0.0F) {
+		ret = -ERANGE;
+		goto safe;
+	}
+	fit.slope = covariance / denominator;
+	fit.intercept_mv = (sum_y - fit.slope * sum_x) / 9.0F;
+	fit.r_squared = (covariance * covariance) /
+			(denominator * variance_y);
+	fit.output_offset_mv = config->startup_dac_mv[AFE_DAC_OUTPUT_OFFSET];
+	*result = fit;
+	error_fraction = (fit.slope - afe_gains[gain_index]) /
+			 afe_gains[gain_index];
+	if (error_fraction < 0.0F) error_fraction = -error_fraction;
+	if (fit.slope <= 0.0F || error_fraction > 0.30F ||
+	    fit.r_squared < 0.97F || fit.intercept_mv < 100.0F ||
+	    fit.intercept_mv > 2100.0F) {
+		ret = -ERANGE;
+		goto safe;
+	}
+	ret = 0;
+safe:
+	reset_ret = afe_reset(dev);
+	if (ret == 0) ret = reset_ret;
+	if (ret == 0) {
+		k_mutex_lock(&data->lock, K_FOREVER);
+		data->calibration[gain_index] = fit;
+		data->calibration_valid[gain_index] = true;
+		k_mutex_unlock(&data->lock);
+	}
+	return ret;
+}
+
+int afe_get_gain_calibration(const struct device *dev, uint8_t gain_index,
+			     struct afe_gain_calibration *result)
+{
+	struct afe_data *data;
+	int ret = 0;
+
+	if (dev == NULL || result == NULL || gain_index >= AFE_GAIN_COUNT) {
+		return -EINVAL;
+	}
+	data = dev->data;
+	k_mutex_lock(&data->lock, K_FOREVER);
+	if (data->calibration_valid[gain_index]) {
+		*result = data->calibration[gain_index];
+	} else {
+		ret = -ENOENT;
+	}
+	k_mutex_unlock(&data->lock);
+	return ret;
+}
+
+int afe_correct_output_mv(const struct device *dev, uint8_t gain_index,
+			  uint16_t raw_mv, int32_t *corrected_mv)
+{
+	struct afe_gain_calibration fit;
+	float corrected;
+	int ret;
+
+	if (corrected_mv == NULL) return -EINVAL;
+	ret = afe_get_gain_calibration(dev, gain_index, &fit);
+	if (ret != 0) return ret;
+	if (fit.slope <= 0.0F) return -ERANGE;
+	corrected = 1024.0F +
+		((float)raw_mv - fit.intercept_mv) *
+		(afe_gains[gain_index] / fit.slope);
+	*corrected_mv = (int32_t)(corrected +
+			(corrected >= 0.0F ? 0.5F : -0.5F));
+	return 0;
+}
+
 static int afe_update_outputs(const struct device *dev, uint16_t mask,
 			      uint16_t value)
 {
@@ -1054,6 +1213,10 @@ int afe_dac_set_mv(const struct device *dev, enum afe_dac_channel channel,
 	ret = data->configured ?
 		afe_dac_write_raw(config, channel, millivolts, defer_update) :
 		-EACCES;
+	if (ret == 0 && channel >= AFE_DAC_INPUT_OFFSET &&
+	    millivolts != config->startup_dac_mv[channel]) {
+		afe_clear_calibration(data);
+	}
 	if (ret != 0 && ret != -EACCES) {
 		data->configured = false;
 	}
@@ -1095,6 +1258,11 @@ int afe_dac_set_all_mv(const struct device *dev,
 	if (ret != 0) {
 	fail:
 		data->configured = false;
+	} else if (millivolts[AFE_DAC_INPUT_OFFSET] !=
+		   config->startup_dac_mv[AFE_DAC_INPUT_OFFSET] ||
+		   millivolts[AFE_DAC_OUTPUT_OFFSET] !=
+		   config->startup_dac_mv[AFE_DAC_OUTPUT_OFFSET]) {
+		afe_clear_calibration(data);
 	}
 out:
 	k_mutex_unlock(&data->lock);

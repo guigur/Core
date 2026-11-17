@@ -188,6 +188,23 @@ inputs and both analog stages disconnected. The default DAC RAM values are
 2500, 2500, 2500 and 3976 mV. These can be overridden per node with
 `startup-gain`, `startup-bandwidth` and `startup-dac-millivolts`.
 
+### Gain calibration
+
+`afe_calibrate_gain()` applies nine symmetric SELF+/SELF- differential
+stimuli for one gain, measures OUT through an application supplied callback,
+and fits `OUT_mV = intercept_mV + slope * differential_mV`. It stores the fit
+in the AFE device's RAM. The callback can use a Zephyr ADC channel or a
+separate reference instrument. The function checks the output range, nominal
+gain error and R², then restores the safe startup state on success or failure.
+It does not write the MCP4728 EEPROM. Run it when no other thread controls
+that AFE.
+
+`afe_get_gain_calibration()` returns a stored fit, and
+`afe_correct_output_mv()` maps a raw OUT reading to the nominal gain curve.
+The output-offset DAC must remain at the value used during calibration.
+The PEBB bench provides a command and ADC mapping for all ten slots; see
+[`src/PEBB_BENCH.md`](../src/PEBB_BENCH.md).
+
 `afe_interrupt_is_pending()` reads the optional active-low `int-gpios` line.
 `afe_interrupt_acknowledge()` reads both TCA9555 input ports, which clears the
 latched interrupt condition. Do not perform this I2C acknowledgement in a GPIO

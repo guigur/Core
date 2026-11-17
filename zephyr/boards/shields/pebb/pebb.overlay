@@ -70,6 +70,18 @@
 	status = "disabled";
 };
 
+/* PEBB AFE OUT nets: PC0/1/2/3 and PB11 on ADC1; PA0/1/4/7 and PC5 on ADC2. */
+&adc1 {
+	pinctrl-0 = <&adc1_in6_pc0 &adc1_in7_pc1 &adc1_in8_pc2
+		     &adc1_in9_pc3 &adc1_in14_pb11>;
+};
+
+&adc2 {
+	pinctrl-0 = <&adc2_in1_pa0 &adc2_in2_pa1 &adc2_in3_pa6
+		     &adc2_in4_pa7 &adc2_in5_pc4 &adc2_in11_pc5
+		     &adc2_in17_pa4>;
+};
+
 &i2c1 {
 	pinctrl-0 = <&i2c1_scl_pa15 &i2c1_sda_pb7>;
 	pinctrl-names = "default";

@@ -15,6 +15,14 @@ IDs: AFEs 0–9 follow `pebb_afe_id`, and HB modules 0–2 follow `pebb_hb_id`.
 | `i2crecover` | Pulse I2C1 SCL on PA15/PB7 using Zephyr's STM32 bus recovery, then probe root mux U805 at `0x70` |
 | `afe 2 provision` | Detect V2_LOW DAC's existing address through LDAC selection and program its configured address `0x64` only if needed |
 | `afe 2 provision 0x60` | Manual override: require the detected V2_LOW address to be `0x60` before programming `0x64` |
+| `afe 6 calibrate` | Sweep all eight I2_LOW gains using its self-test DACs and PA1/ADC2; store fit coefficients in RAM |
+| `afe 6 calibrate 4` | Calibrate only gain index 4 (nominal x1) |
+| `afe 6 calstatus` | Print all valid RAM fits: raw slope, intercept, R² and gain error |
+| `mock start 6 sine 200 50 4` | Generate a sine on I2_LOW with ±200 mV SELF+ differential, gain index 4 and 50 ms per point |
+| `mock start all triangle 100 100 4` | Generate the same triangle on every READY AFE |
+| `mock read` | Print one CSV snapshot of all ten AFE OUT ADC inputs, including absent slots |
+| `mock stream 500`, `mock stream 0` | Change the automatic CSV print period or disable printing while the waveform keeps running |
+| `mock status`, `mock stop` | Inspect mock state or stop and reset the selected AFEs |
 | `test all` | Read-only checks of PEBB controls/fan status, every AFE GPIO/DAC, every HB temperature/alert/module record, and feeder EEPROM/data |
 | `test pebb`, `test feeder` | Read-only checks of one subsystem |
 | `test afe 0`, `test afe all` | Read one or all AFE GPIO registers, DAC RAM/EEPROM and INT status |
@@ -22,9 +30,67 @@ IDs: AFEs 0–9 follow `pebb_afe_id`, and HB modules 0–2 follow `pebb_hb_id`.
 | `exercise afe 0`, `exercise afe all` | Disconnect stages, set gain index 0 and bandwidth index 7, select external inputs, toggle LED, rewrite the current DAC A RAM value and read it back |
 | `exercise all` | Run `test all`, toggle/restore CAN/RS485 termination and exercise all AFEs |
 
-The test does not claim to validate analog gain or temperature accuracy: those
-need external stimulus or a reference instrument. An erased HB EEPROM is shown
+`test all` remains a digital/readback check. `afe ID calibrate` measures the
+analog path with the onboard DAC stimulus and STM32 ADC; absolute accuracy
+still depends on their references. An erased HB EEPROM is shown
 as blank; an unexpected record version or I²C failure is reported as an error.
+
+## AFE automatic gain calibration
+
+Run `scan` first and choose an AFE reported `READY`. Disconnect external
+high-energy input signals before calibration. The command selects both self
+inputs, connects the gain and bandwidth stages, and holds the output-offset
+DAC at the Devicetree startup value (3976 mV by default). For each gain it
+drives nine differential points with SELF+ around 2500 mV and SELF- fixed at
+2500 mV. The STM32 ADC discards its first sample and averages 16 conversions
+at each point. The fit is `OUT_mV = intercept_mV + slope * (SELF+ - SELF-)`.
+
+The command rejects a measured OUT over 2200 mV, a slope outside ±30% of
+nominal, R² below 0.97 or an intercept outside 100–2100 mV. It resets the AFE
+to its safe startup state afterwards. No DAC EEPROM write occurs. Coefficients
+are kept per AFE and gain in RAM until reset; use `afe ID calstatus` to inspect
+them. Application code can use `afe_get_gain_calibration()` and
+`afe_correct_output_mv()` to compensate an ADC reading. Keep the output-offset
+DAC at the same startup setting when applying those coefficients.
+
+| AFE ID | OUT net | STM32 pin | ADC channel |
+| ---: | --- | --- | --- |
+| 0 V_HIGH | `/VHigh_{MCU}` | PC2 | ADC1_IN8 |
+| 1 V1_LOW | `/V1Low_{MCU}` | PC0 | ADC1_IN6 |
+| 2 V2_LOW | `/V2Low_{MCU}` | PA0 | ADC2_IN1 |
+| 3 V3_LOW | `/V3Low_{MCU}` | PA7 | ADC2_IN4 |
+| 4 I_HIGH | `/IHigh_{MCU}` | PC3 | ADC1_IN9 |
+| 5 I1_LOW | `/I1Low_{MCU}` | PC1 | ADC1_IN7 |
+| 6 I2_LOW | `/I2Low_{MCU}` | PA1 | ADC2_IN2 |
+| 7 I3_LOW | `/I3Low_{MCU}` | PB11 | ADC1_IN14 |
+| 8 ANALOG1 | `/SIN_{MCU}` | PC5 | ADC2_IN11 |
+| 9 ANALOG2 | `/COS_{MCU}` | PA4 | ADC2_IN17 |
+
+These connections come from the current PEBB KiCad netlist. Zephyr's STM32
+ADC conversion uses the configured 3300 mV reference; verify VDDA if absolute
+mV accuracy matters. PA4 is also DAC1_OUT1 on SPIN: do not start DAC1 channel 1
+while calibrating ANALOG2.
+
+## AFE mock waveform and ten-channel ADC readout
+
+`mock start ID|all sine|square|triangle AMP_MV STEP_MS [GAIN]` configures the
+selected READY AFEs for self-test input, BW7 and the chosen gain. The waveform
+changes SELF+ around 2500 mV while SELF- stays at 2500 mV. There are 32
+points per cycle; `STEP_MS` is at least 20 ms and the actual cycle also
+includes I²C writes and ADC reads. Gain defaults to index 4 (x1). Amplitude
+is limited for each gain so the nominal OUT movement stays near 300 mV.
+
+The bench prints `AFE_OUT_MV,uptime_ms,ready_mask,V_HIGH,...,ANALOG2` followed
+by CSV values in mV every 500 ms by default. `mock read` prints one snapshot
+even with no waveform running. The `ready_mask` marks AFE drivers that are
+READY; ADC readings for absent slots may float and are diagnostic only.
+`mock stream PERIOD_MS` changes the print interval (`0` disables it).
+
+The dedicated mock worker checks every selected OUT against 2200 mV after each point. An ADC
+or AFE write error, or an over-range reading, stops the waveform and resets
+all selected AFEs. `mock stop` does the same on request. While mock is running,
+the bench rejects other AFE control, provisioning, calibration, exercise and
+I²C recovery commands. Use `mock stop` before those operations.
 
 ## Feeder I²C wiring
 
